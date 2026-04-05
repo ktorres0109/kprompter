@@ -67,6 +67,15 @@ pip install --quiet -r "$INSTALL_DIR/requirements.txt"
 # macOS extra
 if [ "$PLATFORM" = "macOS" ]; then
   pip install --quiet pyobjc-framework-Quartz pyobjc-framework-Cocoa 2>/dev/null || true
+
+# Strip macOS Gatekeeper quarantine so the app opens without "unidentified developer" prompt
+  find "$INSTALL_DIR" -name "*.app" -exec xattr -cr {} \; 2>/dev/null || true
+
+  echo ""
+  echo -e "  ${CYAN}macOS Accessibility permission required${RESET}"
+  echo -e "  ${DIM}Go to: System Settings → Privacy & Security → Accessibility${RESET}"
+  echo -e "  ${DIM}Add Terminal (or KPrompter) to allow the hotkey to work.${RESET}"
+
 fi
 
 # ── Create launcher script ───────────────────────────────────────────────────
