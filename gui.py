@@ -53,12 +53,14 @@ def _btn(parent, text, command, accent=True, small=False, **kw):
     font = (*FONT_UI[:2], "bold") if accent else FONT_UI
     if small:
         font = (FONT_UI[0], 10)
-    b = tk.Button(parent, text=text, command=command,
-                  bg=bg, fg=fg, activebackground=hov, activeforeground=TEXT,
-                  disabledforeground=TEXT_DIM,
-                  font=font, relief="flat", bd=0,
-                  padx=10 if small else 14, pady=4 if small else 7,
-                  cursor="hand2", **kw)
+    px = 10 if small else 14
+    py = 4  if small else 7
+    # Use Label instead of Button — macOS overrides tk.Button colors on flat/native theme
+    b = tk.Label(parent, text=text, bg=bg, fg=fg,
+                 font=font, cursor="hand2",
+                 padx=px, pady=py,
+                 relief="flat", bd=0, **kw)
+    b.bind("<Button-1>", lambda e: command())
     b.bind("<Enter>", lambda e: b.configure(bg=hov))
     b.bind("<Leave>", lambda e: b.configure(bg=bg))
     return b
@@ -463,9 +465,12 @@ class ResultPopup:
                  font=(*FONT_MONO[:1], 13, "bold")).pack(side="left")
         tk.Label(hdr, text=tag, bg=BG2, fg=tag_color,
                  font=(*FONT_UI[:2], "bold")).pack(side="left", padx=8)
-        tk.Button(hdr, text="✕", command=root.destroy, bg=BG2, fg=TEXT_DIM,
-                  activebackground=BG2, activeforeground=RED,
-                  relief="flat", bd=0, font=FONT_UI, cursor="hand2").pack(side="right")
+        x_btn = tk.Label(hdr, text="✕", bg=BG2, fg=TEXT_DIM,
+                         font=FONT_UI, cursor="hand2")
+        x_btn.bind("<Button-1>", lambda e: root.destroy())
+        x_btn.bind("<Enter>", lambda e: x_btn.configure(fg=RED))
+        x_btn.bind("<Leave>", lambda e: x_btn.configure(fg=TEXT_DIM))
+        x_btn.pack(side="right")
 
         # Body
         body = tk.Frame(root, bg=BG, padx=14, pady=10)
