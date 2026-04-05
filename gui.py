@@ -14,8 +14,9 @@ SYSTEM = platform.system()
 # ── Palette ───────────────────────────────────────────────────────────────────
 BG       = "#0d0f13"
 BG2      = "#13161c"
-BG3      = "#1c2030"
-BORDER   = "#2a2f3d"
+BG3      = "#1e2235"   # input bg — clearly distinct from window bg
+BTN_SEC  = "#252b3b"   # secondary button bg
+BORDER   = "#363d52"   # brighter so fields are visible
 ACCENT   = "#4af0a0"
 ACCENT2  = "#3dd8f0"
 TEXT     = "#e8eaf0"
@@ -47,8 +48,8 @@ def _style_root(root, title, w, h, resizable=False):
 
 def _btn(parent, text, command, accent=True, small=False, **kw):
     fg  = BG   if accent else TEXT
-    bg  = ACCENT if accent else BG3
-    hov = "#2dd880" if accent else "#222840"
+    bg  = ACCENT if accent else BTN_SEC
+    hov = "#2dd880" if accent else "#2e3650"
     font = (*FONT_UI[:2], "bold") if accent else FONT_UI
     if small:
         font = (FONT_UI[0], 10)
@@ -63,11 +64,13 @@ def _btn(parent, text, command, accent=True, small=False, **kw):
 
 
 def _entry(parent, textvariable=None, show=None, width=38):
-    return tk.Entry(parent, textvariable=textvariable, show=show,
-                    bg=BG3, fg=TEXT, insertbackground=ACCENT,
-                    relief="flat", bd=0, font=FONT_MONO, width=width,
-                    highlightthickness=1, highlightbackground=BORDER,
-                    highlightcolor=ACCENT)
+    e = tk.Entry(parent, textvariable=textvariable, show=show,
+                 bg=BG3, fg=TEXT, insertbackground=ACCENT,
+                 relief="flat", bd=0, font=FONT_MONO, width=width,
+                 highlightthickness=2, highlightbackground=BORDER,
+                 highlightcolor=ACCENT)
+    # pack with ipady so the field has visible height on macOS
+    return e
 
 
 def _label(parent, text, dim=False, big=False, color=None, **kw):
@@ -168,7 +171,7 @@ class SetupWizard:
         ind = tk.Frame(self.container, bg=BG)
         ind.pack(anchor="w")
         for i in range(total):
-            c = ACCENT if i == step_n else BORDER
+            c = ACCENT if i == step_n else "#404a60"
             w = 28 if i == step_n else 8
             tk.Frame(ind, bg=c, width=w, height=4).pack(side="left", padx=2)
 
@@ -261,7 +264,7 @@ class SetupWizard:
             _label(self.container, "Paste your API key:").pack(anchor="w")
             tk.Frame(self.container, bg=BG, height=6).pack()
             key_entry = _entry(self.container, textvariable=self._key_var, show="•", width=48)
-            key_entry.pack(fill="x")
+            key_entry.pack(fill="x", ipady=7)
             tk.Frame(self.container, bg=BG, height=10).pack()
 
             btn_row = tk.Frame(self.container, bg=BG)
@@ -274,12 +277,12 @@ class SetupWizard:
                      accent=False).pack(side="left", padx=8)
 
             tk.Frame(self.container, bg=BG, height=12).pack()
-            warn = tk.Frame(self.container, bg="#1a140a",
-                            highlightthickness=1, highlightbackground="#5a3a00",
-                            pady=8, padx=10)
+            warn = tk.Frame(self.container, bg="#2a1f00",
+                            highlightthickness=1, highlightbackground="#c87000",
+                            pady=10, padx=12)
             warn.pack(fill="x")
             tk.Label(warn, text="  Set a spending or credit limit before using any paid model.",
-                     bg="#1a140a", fg=YELLOW, font=FONT_UI).pack(anchor="w")
+                     bg="#2a1f00", fg="#ffd060", font=(*FONT_UI[:2], "bold")).pack(anchor="w")
         self._nav()
 
     # ── Step 3: Model picker ──────────────────────────────────────────────────
@@ -558,7 +561,7 @@ class SettingsWindow:
         _label(pad, "Hotkey").pack(anchor="w")
         tk.Frame(pad, bg=BG, height=5).pack()
         hk_var = tk.StringVar(value=self.cfg.get("hotkey", "ctrl+alt+g"))
-        _entry(pad, textvariable=hk_var).pack(anchor="w")
+        _entry(pad, textvariable=hk_var).pack(anchor="w", ipady=6)
         tk.Frame(pad, bg=BG, height=14).pack()
 
         log_var = tk.BooleanVar(value=self.cfg.get("logging_enabled", True))
@@ -570,7 +573,7 @@ class SettingsWindow:
 
         _label(pad, "Max log entries").pack(anchor="w")
         log_n_var = tk.StringVar(value=str(self.cfg.get("log_max_entries", 100)))
-        _entry(pad, textvariable=log_n_var, width=10).pack(anchor="w")
+        _entry(pad, textvariable=log_n_var, width=10).pack(anchor="w", ipady=6)
         tk.Frame(pad, bg=BG, height=18).pack()
 
         def save():
@@ -608,7 +611,7 @@ class SettingsWindow:
         tk.Frame(pad, bg=BG, height=5).pack()
         key_var = tk.StringVar(value=self.cfg.get("api_key", ""))
         key_entry = _entry(pad, textvariable=key_var, show="•", width=48)
-        key_entry.pack(anchor="w")
+        key_entry.pack(anchor="w", ipady=6)
 
         tk.Frame(pad, bg=BG, height=12).pack()
         _label(pad, "Model").pack(anchor="w")
