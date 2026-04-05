@@ -15,7 +15,7 @@ SYSTEM = platform.system()
 BG       = "#0d0f13"
 BG2      = "#13161c"
 BG3      = "#1e2235"   # input bg — clearly distinct from window bg
-BTN_SEC  = "#2e3a52"   # secondary button bg — clearly visible on dark bg
+BTN_SEC  = "#4a5a78"   # secondary button bg — clearly visible on dark bg
 BORDER   = "#363d52"   # brighter so fields are visible
 ACCENT   = "#4af0a0"
 ACCENT2  = "#3dd8f0"
@@ -49,7 +49,7 @@ def _style_root(root, title, w, h, resizable=False):
 def _btn(parent, text, command, accent=True, small=False, **kw):
     fg  = BG   if accent else TEXT
     bg  = ACCENT if accent else BTN_SEC
-    hov = "#2dd880" if accent else "#3a4a68"
+    hov = "#2dd880" if accent else "#5a6e90"
     font = (*FONT_UI[:2], "bold") if accent else FONT_UI
     if small:
         font = (FONT_UI[0], 10)
