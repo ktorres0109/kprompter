@@ -4,6 +4,10 @@ on:
   release:
     types: [published]
 
+# Give the token write access to create release assets
+permissions:
+  contents: write
+
 jobs:
   build-windows:
     runs-on: windows-latest
@@ -15,8 +19,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install deps
-        run: |
-          pip install -r requirements.txt pyinstaller
+        run: pip install -r requirements.txt pyinstaller
 
       - name: Generate icon
         run: python icon_gen.py
@@ -60,10 +63,7 @@ jobs:
           main.py
 
       - name: Zip app bundle
-        run: |
-          cd dist
-          zip -r KPrompter-macOS.zip KPrompter.app
-          cd ..
+        run: cd dist && zip -r KPrompter-macOS.zip KPrompter.app
 
       - name: Upload
         uses: softprops/action-gh-release@v2
