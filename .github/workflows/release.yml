@@ -75,7 +75,7 @@ jobs:
           xattr -cr dist/KPrompter.app
 
       - name: Zip app bundle
-        run: cd dist && zip -r KPrompter-macOS.zip KPrompter.app
+        run: cd dist && ditto -c -k --sequesterRsrc --keepParent KPrompter.app KPrompter-macOS.zip
 
       - name: Upload
         uses: softprops/action-gh-release@v2
