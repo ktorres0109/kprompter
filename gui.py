@@ -36,7 +36,7 @@ def _style_root(root: tk.Tk, title: str, w: int, h: int, resizable=False):
     y = (sh - h) // 2
     root.geometry(f"{w}x{h}+{x}+{y}")
     if SYSTEM == "Darwin":
-        root.tk.call("::tk::unsupported::MacWindowStyle", "style", root, "documentProc", "closeBox")
+        root.tk.call("::tk::unsupported::MacWindowStyle", "style", root, "document", "closeBox")
 
 
 def _btn(parent, text, command, accent=True, **kw):
