@@ -74,18 +74,20 @@ jobs:
           find dist/KPrompter.app -name "._*" -delete
           xattr -cr dist/KPrompter.app
 
-      - name: Zip app bundle
+      - name: Build DMG
         run: |
-          cp install.command dist/install.command
-          chmod +x dist/install.command
-          cd dist
-          ditto -c -k --sequesterRsrc --keepParent KPrompter.app KPrompter-macOS.zip
-          zip -u KPrompter-macOS.zip install.command
+          mkdir -p dmg_stage
+          cp -r dist/KPrompter.app dmg_stage/KPrompter.app
+          ln -s /Applications dmg_stage/Applications
+          hdiutil create -volname "KPrompter" \
+            -srcfolder dmg_stage \
+            -ov -format UDZO \
+            dist/KPrompter-macOS.dmg
 
       - name: Upload
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/KPrompter-macOS.zip
+          files: dist/KPrompter-macOS.dmg
 
   build-linux:
     runs-on: ubuntu-latest
