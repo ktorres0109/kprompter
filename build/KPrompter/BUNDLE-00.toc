@@ -1,1 +1,0 @@
-([('KPrompter', '/Users/kel/Desktop/kprompter/dist/KPrompter', 'EXECUTABLE')],)
