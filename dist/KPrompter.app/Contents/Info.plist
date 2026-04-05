@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDisplayName</key>
+	<string>KPrompter</string>
+	<key>CFBundleExecutable</key>
+	<string>KPrompter</string>
+	<key>CFBundleIconFile</key>
+	<string>generated-54ba55ea7243688ccc56d289b19fe3680fceeff7ec75f6fc5848ae808a9812b6.icns</string>
+	<key>CFBundleIdentifier</key>
+	<string>KPrompter</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>KPrompter</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.0.0</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+</dict>
+</plist>

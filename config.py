@@ -20,7 +20,6 @@ CONFIG_DIR = get_config_dir()
 CONFIG_FILE = CONFIG_DIR / "config.json"
 LOG_FILE = CONFIG_DIR / "session_log.json"
 PROMPT_FILE = CONFIG_DIR / "system_prompt.txt"
-
 DEFAULT_SYSTEM_PROMPT_PATH = Path(__file__).parent / "prompts" / "default.txt"
 
 DEFAULTS = {
@@ -34,52 +33,93 @@ DEFAULTS = {
     "first_message_default": True,
 }
 
+# Each provider has: name, base_url, models list (label, id, free?), best_free, key_url, setup_tip
 PROVIDERS = {
     "openrouter": {
         "name": "OpenRouter",
         "base_url": "https://openrouter.ai/api/v1",
-        "default_model": "mistralai/mistral-7b-instruct:free",
-        "free_models": [
-            "mistralai/mistral-7b-instruct:free",
-            "google/gemma-2-9b-it:free",
-            "meta-llama/llama-3-8b-instruct:free",
+        "best_free": "mistralai/mistral-7b-instruct:free",
+        "models": [
+            {"label": "Mistral 7B (free)",        "id": "mistralai/mistral-7b-instruct:free",      "free": True},
+            {"label": "Llama 3 8B (free)",         "id": "meta-llama/llama-3-8b-instruct:free",     "free": True},
+            {"label": "Gemma 2 9B (free)",         "id": "google/gemma-2-9b-it:free",               "free": True},
+            {"label": "Mistral Small 3.1 (free)",  "id": "mistralai/mistral-small-3.1-24b-instruct:free", "free": True},
+            {"label": "Llama 3.3 70B (free)",      "id": "meta-llama/llama-3.3-70b-instruct:free",  "free": True},
+            {"label": "GPT-4o mini",               "id": "openai/gpt-4o-mini",                      "free": False},
+            {"label": "Claude 3 Haiku",            "id": "anthropic/claude-3-haiku",                "free": False},
+            {"label": "Claude 3.5 Sonnet",         "id": "anthropic/claude-3.5-sonnet",             "free": False},
+            {"label": "GPT-4o",                    "id": "openai/gpt-4o",                           "free": False},
         ],
         "key_url": "https://openrouter.ai/keys",
-        "setup_tip": "Go to openrouter.ai → Keys → Create Key. Set a $0 credit limit to avoid any charges.",
+        "setup_tip": "Recommended. Set a $0 credit limit to block paid models entirely.",
     },
     "anthropic": {
         "name": "Anthropic",
         "base_url": "https://api.anthropic.com/v1",
-        "default_model": "claude-3-haiku-20240307",
-        "free_models": [],
+        "best_free": "claude-3-haiku-20240307",
+        "models": [
+            {"label": "Claude 3 Haiku (cheapest)", "id": "claude-3-haiku-20240307",      "free": False},
+            {"label": "Claude 3.5 Haiku",          "id": "claude-3-5-haiku-20241022",    "free": False},
+            {"label": "Claude 3.5 Sonnet",         "id": "claude-3-5-sonnet-20241022",   "free": False},
+            {"label": "Claude 3.7 Sonnet",         "id": "claude-3-7-sonnet-20250219",   "free": False},
+            {"label": "Claude Opus 4",             "id": "claude-opus-4-5",              "free": False},
+        ],
         "key_url": "https://console.anthropic.com/settings/keys",
-        "setup_tip": "Anthropic is a paid service. Set a spending limit in your account settings.",
+        "setup_tip": "Paid service. Set a spending limit under Account → Billing.",
     },
     "openai": {
         "name": "OpenAI",
         "base_url": "https://api.openai.com/v1",
-        "default_model": "gpt-3.5-turbo",
-        "free_models": [],
+        "best_free": "gpt-4o-mini",
+        "models": [
+            {"label": "GPT-4o mini (cheapest)",    "id": "gpt-4o-mini",           "free": False},
+            {"label": "GPT-4o",                    "id": "gpt-4o",                "free": False},
+            {"label": "GPT-4 Turbo",               "id": "gpt-4-turbo",           "free": False},
+            {"label": "o1 mini",                   "id": "o1-mini",               "free": False},
+            {"label": "o3 mini",                   "id": "o3-mini",               "free": False},
+        ],
         "key_url": "https://platform.openai.com/api-keys",
-        "setup_tip": "OpenAI is a paid service. Set a usage limit under Billing → Limits.",
+        "setup_tip": "Paid service. Set a usage limit under Billing → Limits.",
     },
     "gemini": {
         "name": "Google Gemini",
         "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
-        "default_model": "gemini-1.5-flash",
-        "free_models": ["gemini-1.5-flash", "gemini-1.5-flash-8b"],
+        "best_free": "gemini-2.0-flash",
+        "models": [
+            {"label": "Gemini 2.0 Flash (free tier)", "id": "gemini-2.0-flash",       "free": True},
+            {"label": "Gemini 1.5 Flash (free tier)", "id": "gemini-1.5-flash",       "free": True},
+            {"label": "Gemini 1.5 Flash 8B (free)",   "id": "gemini-1.5-flash-8b",   "free": True},
+            {"label": "Gemini 1.5 Pro",               "id": "gemini-1.5-pro",        "free": False},
+            {"label": "Gemini 2.0 Pro",               "id": "gemini-2.0-pro-exp",    "free": False},
+        ],
         "key_url": "https://aistudio.google.com/apikey",
-        "setup_tip": "Get a free key at aistudio.google.com. Has free tier but set billing limits just in case.",
+        "setup_tip": "Get a free key at aistudio.google.com. Set billing limits just in case.",
     },
     "ollama": {
         "name": "Ollama (Local)",
         "base_url": "http://localhost:11434/v1",
-        "default_model": "llama3",
-        "free_models": ["llama3", "mistral", "gemma2"],
+        "best_free": "llama3",
+        "models": [
+            {"label": "Llama 3 8B",      "id": "llama3",          "free": True},
+            {"label": "Llama 3.1 8B",    "id": "llama3.1",        "free": True},
+            {"label": "Mistral 7B",      "id": "mistral",         "free": True},
+            {"label": "Gemma 2 9B",      "id": "gemma2",          "free": True},
+            {"label": "Phi-3 Mini",      "id": "phi3:mini",       "free": True},
+            {"label": "Qwen 2.5 7B",     "id": "qwen2.5",         "free": True},
+        ],
         "key_url": "https://ollama.com/download",
-        "setup_tip": "No API key needed. Install Ollama and run: ollama pull llama3",
+        "setup_tip": "No API key needed. Run: ollama pull llama3",
     },
 }
+
+
+def get_best_model(provider: str) -> str:
+    return PROVIDERS.get(provider, {}).get("best_free", "")
+
+
+def get_model_labels(provider: str) -> list:
+    """Returns list of (label, model_id, is_free) tuples for UI dropdowns."""
+    return [(m["label"], m["id"], m["free"]) for m in PROVIDERS.get(provider, {}).get("models", [])]
 
 
 def load_config() -> dict:
