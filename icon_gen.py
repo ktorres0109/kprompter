@@ -1,169 +1,240 @@
 """
-Generates KPrompter's icon: a terminal-style 'K>' prompt mark.
-Writes assets/icon.png and assets/icon.svg
+Generates KPrompter's icon: terminal-style 'K>' on a dark rounded background.
+Produces:
+  assets/icon.png   — 1024×1024 (used by PyInstaller on Linux/Windows)
+  assets/icon.icns  — macOS icon set (16→1024px, used by PyInstaller on macOS)
 """
+import os
 import struct
 import zlib
-import math
-import os
 
 ASSET_DIR = os.path.join(os.path.dirname(__file__), "assets")
 os.makedirs(ASSET_DIR, exist_ok=True)
 
-SVG = """\
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
-  <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#13161c"/>
-      <stop offset="100%" stop-color="#0d0f13"/>
-    </linearGradient>
-    <linearGradient id="glow" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#4af0a0"/>
-      <stop offset="100%" stop-color="#3dd8f0"/>
-    </linearGradient>
-    <filter id="blur">
-      <feGaussianBlur stdDeviation="2" result="blur"/>
-      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
-    </filter>
-  </defs>
 
-  <!-- Background rounded rect -->
-  <rect width="64" height="64" rx="14" fill="url(#bg)"/>
+# ── Pillow renderer ──────────────────────────────────────────────────────────
 
-  <!-- Subtle border -->
-  <rect width="63" height="63" x="0.5" y="0.5" rx="13.5"
-        fill="none" stroke="#2a2f3d" stroke-width="1"/>
+def _render_pillow(size: int):
+    """Return a Pillow Image of the icon at `size`×`size`."""
+    from PIL import Image, ImageDraw, ImageFont
 
-  <!-- Glow halo behind text -->
-  <text x="32" y="41" text-anchor="middle"
-        font-family="'JetBrains Mono','Menlo','Consolas',monospace"
-        font-weight="700" font-size="26"
-        fill="#4af0a0" opacity="0.18" filter="url(#blur)">K&gt;</text>
+    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
 
-  <!-- Main K> text -->
-  <text x="32" y="41" text-anchor="middle"
-        font-family="'JetBrains Mono','Menlo','Consolas',monospace"
-        font-weight="700" font-size="26"
-        fill="url(#glow)">K&gt;</text>
+    radius = int(size * 0.22)
+    # Dark background
+    draw.rounded_rectangle([0, 0, size - 1, size - 1], radius=radius,
+                            fill=(13, 15, 19, 255))
+    # Subtle border
+    draw.rounded_rectangle([1, 1, size - 2, size - 2], radius=radius - 1,
+                            outline=(50, 58, 82, 255), width=max(1, size // 64))
 
-  <!-- Cursor blink bar -->
-  <rect x="43" y="31" width="5" height="3" rx="1" fill="#4af0a0" opacity="0.7"/>
-</svg>
-"""
+    # Font size and position — draw centered
+    font_size = int(size * 0.44)
+    font = _best_font(font_size)
 
+    # Measure text to center it and place cursor correctly
+    bbox = draw.textbbox((0, 0), "K>", font=font)
+    text_w = bbox[2] - bbox[0]
+    text_h = bbox[3] - bbox[1]
+    text_x = (size - text_w) // 2 - bbox[0]
+    text_y = (size - text_h) // 2 - bbox[1]
 
-def write_svg():
-    path = os.path.join(ASSET_DIR, "icon.svg")
-    with open(path, "w") as f:
-        f.write(SVG)
-    return path
+    # Glow layer
+    draw.text((text_x + 3, text_y + 3), "K>", fill=(74, 240, 160, 35), font=font)
+    # Main text
+    draw.text((text_x, text_y), "K>", fill=(74, 240, 160, 255), font=font)
+
+    # Cursor block — sits right after "K>" at baseline
+    bar_w = max(3, size // 18)
+    bar_h = max(4, size // 12)
+    bar_x = text_x + text_w + max(2, size // 60)
+    bar_y = text_y + text_h - bar_h
+    draw.rectangle([bar_x, bar_y, bar_x + bar_w, bar_y + bar_h],
+                   fill=(74, 240, 160, 200))
+
+    return img
 
 
-def write_png_fallback():
-    """
-    Write a minimal 64x64 PNG without Pillow.
-    Dark background with a white 'K' shape drawn pixel-by-pixel.
-    Used only if cairosvg / Pillow not available.
-    """
-    size = 64
+def _best_font(size: int):
+    from PIL import ImageFont
+    import platform
+    candidates = []
+    if platform.system() == "Darwin":
+        candidates = [
+            "/System/Library/Fonts/Menlo.ttc",
+            "/System/Library/Fonts/Supplemental/Courier New Bold.ttf",
+            "/Library/Fonts/JetBrainsMono-Bold.ttf",
+            "/System/Library/Fonts/Monaco.ttf",
+            "/System/Library/Fonts/Courier.dfont",
+        ]
+    elif platform.system() == "Windows":
+        candidates = [
+            "C:/Windows/Fonts/consola.ttf",
+            "C:/Windows/Fonts/cour.ttf",
+        ]
+    else:
+        candidates = [
+            "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationMono-Bold.ttf",
+        ]
+    for path in candidates:
+        try:
+            return ImageFont.truetype(path, size)
+        except Exception:
+            pass
+    try:
+        return ImageFont.load_default(size=size)
+    except Exception:
+        return ImageFont.load_default()
+
+
+# ── .icns builder ────────────────────────────────────────────────────────────
+
+ICNS_SIZES = [16, 32, 64, 128, 256, 512, 1024]
+
+# OSType codes for each size and @2x retina variant
+ICNS_TYPES = {
+    16:   (b"icp4", b"icp5"),   # 16, 16@2x (=32)
+    32:   (b"icp5", b"icp6"),
+    64:   (b"icp6", b"ic10"),
+    128:  (b"ic07", b"ic08"),
+    256:  (b"ic08", b"ic09"),
+    512:  (b"ic09", b"ic10"),
+    1024: (b"ic10", None),
+}
+
+
+def _png_bytes(img) -> bytes:
+    import io
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def build_icns(out_path: str):
+    """Build a proper .icns from Pillow-rendered frames."""
+    from PIL import Image
+
+    master = _render_pillow(1024)
+
+    chunks = []
+    seen = set()
+    for size in ICNS_SIZES:
+        img = master.resize((size, size), Image.LANCZOS)
+        data = _png_bytes(img)
+        ostype1, ostype2 = ICNS_TYPES[size]
+
+        if ostype1 not in seen:
+            chunks.append((ostype1, data))
+            seen.add(ostype1)
+
+        # @2x = next size up already covered, or double
+        retina_size = size * 2
+        if ostype2 and ostype2 not in seen and retina_size <= 1024:
+            img2x = master.resize((retina_size, retina_size), Image.LANCZOS)
+            chunks.append((ostype2, _png_bytes(img2x)))
+            seen.add(ostype2)
+
+    # Assemble icns file
+    body = b""
+    for ostype, data in chunks:
+        chunk_len = 8 + len(data)
+        body += ostype + struct.pack(">I", chunk_len) + data
+
+    total = 8 + len(body)
+    with open(out_path, "wb") as f:
+        f.write(b"icns" + struct.pack(">I", total) + body)
+
+    return out_path
+
+
+# ── Pure-Python 1024×1024 PNG fallback (no Pillow) ──────────────────────────
+
+def _make_raw_png(size: int) -> bytes:
+    """Minimal 1024×1024 dark PNG with pixel-art K> — no deps."""
     pixels = [[(13, 15, 19)] * size for _ in range(size)]
+    green = (74, 240, 160)
+    cyan  = (61, 216, 240)
 
-    # Draw a simple 'K' at 20x20 starting at (14, 20)
-    # Vertical bar of K
-    for y in range(20, 44):
-        pixels[y][14] = (74, 240, 160)
-        pixels[y][15] = (74, 240, 160)
+    # Scale factor relative to 64px original
+    s = size // 64
 
-    # Upper diagonal of K (top-right)
+    def dot(y, x, color):
+        for dy in range(s):
+            for dx in range(s):
+                ry, rx = y * s + dy, x * s + dx
+                if 0 <= ry < size and 0 <= rx < size:
+                    pixels[ry][rx] = color
+
+    # Vertical bar of K (col 14-15, rows 20-43)
+    for row in range(20, 44):
+        dot(row, 14, green)
+        dot(row, 15, green)
+    # Upper arm of K
     for i in range(12):
-        y = 20 + i
-        x = 17 + i
-        if 0 <= x < size and 0 <= y < size:
-            pixels[y][x] = (74, 240, 160)
-            if x + 1 < size:
-                pixels[y][x + 1] = (74, 240, 160)
-
-    # Lower diagonal of K (bottom-right)
+        dot(20 + i, 17 + i, green)
+        dot(20 + i, 18 + i, green)
+    # Lower arm of K
     for i in range(12):
-        y = 32 + i
-        x = 29 - i
-        if 0 <= x < size and 0 <= y < size:
-            pixels[y][x] = (74, 240, 160)
-            if x + 1 < size:
-                pixels[y][x + 1] = (74, 240, 160)
-
-    # Draw '>' at x=36
+        dot(32 + i, 29 - i, green)
+        dot(32 + i, 30 - i, green)
+    # > chevron
     for i in range(6):
-        pixels[26 + i][36 + i] = (61, 216, 240)
-        pixels[26 + i][37 + i] = (61, 216, 240)
-    for i in range(6):
-        pixels[38 - i][36 + i] = (61, 216, 240)
-        pixels[38 - i][37 + i] = (61, 216, 240)
+        dot(26 + i, 36 + i, cyan)
+        dot(38 - i, 36 + i, cyan)
 
-    # Encode as PNG
-    def make_png(pixels, size):
-        def png_chunk(name, data):
-            crc = zlib.crc32(name + data) & 0xFFFFFFFF
-            return struct.pack(">I", len(data)) + name + data + struct.pack(">I", crc)
+    def png_chunk(tag, data):
+        crc = zlib.crc32(tag + data) & 0xFFFFFFFF
+        return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", crc)
 
-        raw = b""
-        for row in pixels:
-            raw += b"\x00"  # filter type none
-            for r, g, b in row:
-                raw += bytes([r, g, b])
+    raw = b""
+    for row in pixels:
+        raw += b"\x00"
+        for r, g, b in row:
+            raw += bytes([r, g, b])
 
-        compressed = zlib.compress(raw, 9)
-        ihdr = struct.pack(">IIBBBBB", size, size, 8, 2, 0, 0, 0)
-        png = b"\x89PNG\r\n\x1a\n"
-        png += png_chunk(b"IHDR", ihdr)
-        png += png_chunk(b"IDAT", compressed)
-        png += png_chunk(b"IEND", b"")
-        return png
+    compressed = zlib.compress(raw, 1)   # level 1 = fast
+    ihdr = struct.pack(">IIBBBBB", size, size, 8, 2, 0, 0, 0)
+    png = (b"\x89PNG\r\n\x1a\n"
+           + png_chunk(b"IHDR", ihdr)
+           + png_chunk(b"IDAT", compressed)
+           + png_chunk(b"IEND", b""))
+    return png
 
-    path = os.path.join(ASSET_DIR, "icon.png")
-    with open(path, "wb") as f:
-        f.write(make_png(pixels, size))
-    return path
 
+# ── Public entry point ───────────────────────────────────────────────────────
 
 def generate():
-    svg_path = write_svg()
-    png_path = os.path.join(ASSET_DIR, "icon.png")
+    """
+    Generate assets/icon.png (1024×1024) and assets/icon.icns.
+    Returns path to icon.png.
+    """
+    import platform
+    png_path  = os.path.join(ASSET_DIR, "icon.png")
+    icns_path = os.path.join(ASSET_DIR, "icon.icns")
 
-    # Try cairosvg first
     try:
-        import cairosvg
-        cairosvg.svg2png(url=svg_path, write_to=png_path, output_width=64, output_height=64)
-        return png_path
-    except ImportError:
-        pass
-
-    # Try Pillow + aggdraw or just Pillow
-    try:
-        from PIL import Image, ImageDraw, ImageFont
-        img = Image.new("RGBA", (64, 64), (13, 15, 19, 255))
-        draw = ImageDraw.Draw(img)
-        # Rounded rect border
-        draw.rounded_rectangle([0, 0, 63, 63], radius=13,
-                                outline=(42, 47, 61, 255), width=1)
-        # Text (fallback font)
-        try:
-            font = ImageFont.truetype("Menlo.ttc", 22)
-        except Exception:
-            try:
-                font = ImageFont.truetype("DejaVuSansMono-Bold.ttf", 22)
-            except Exception:
-                font = ImageFont.load_default()
-        draw.text((8, 18), "K>", fill=(74, 240, 160, 255), font=font)
+        from PIL import Image
+        img = _render_pillow(1024)
         img.save(png_path, "PNG")
+        if platform.system() == "Darwin":
+            build_icns(icns_path)
         return png_path
     except ImportError:
         pass
 
-    # Pure fallback
-    return write_png_fallback()
+    # Fallback: pure-Python PNG, no .icns
+    with open(png_path, "wb") as f:
+        f.write(_make_raw_png(1024))
+    return png_path
 
 
 if __name__ == "__main__":
     p = generate()
     print(f"Icon written: {p}")
+    import platform
+    if platform.system() == "Darwin":
+        icns = os.path.join(ASSET_DIR, "icon.icns")
+        if os.path.exists(icns):
+            print(f"icns written: {icns} ({os.path.getsize(icns)//1024} KB)")

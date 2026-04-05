@@ -57,16 +57,22 @@ jobs:
         run: >
           pyinstaller --onedir --windowed
           --name KPrompter
-          --icon assets/icon.png
+          --icon assets/icon.icns
           --add-data "prompts/default.txt:prompts"
           --add-data "assets/icon.png:assets"
+          --add-data "assets/icon.icns:assets"
+          --osx-bundle-identifier "com.ktorres.kprompter"
           main.py
 
-      - name: Inject Info.plist
-        run: cp Info.plist dist/KPrompter.app/Contents/Info.plist
+      - name: Inject Info.plist + icon
+        run: |
+          cp Info.plist dist/KPrompter.app/Contents/Info.plist
+          cp assets/icon.icns dist/KPrompter.app/Contents/Resources/icon.icns
 
       - name: Strip quarantine
-        run: xattr -cr dist/KPrompter.app
+        run: |
+          find dist/KPrompter.app -name "._*" -delete
+          xattr -cr dist/KPrompter.app
 
       - name: Zip app bundle
         run: cd dist && zip -r KPrompter-macOS.zip KPrompter.app
