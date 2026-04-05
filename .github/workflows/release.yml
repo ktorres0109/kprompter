@@ -69,25 +69,29 @@ jobs:
           cp Info.plist dist/KPrompter.app/Contents/Info.plist
           cp assets/icon.icns dist/KPrompter.app/Contents/Resources/icon.icns
 
-      - name: Strip quarantine
+      - name: Strip quarantine from app
         run: |
           find dist/KPrompter.app -name "._*" -delete
           xattr -cr dist/KPrompter.app
 
-      - name: Build DMG
+      - name: Build PKG installer
         run: |
-          mkdir -p dmg_stage
-          cp -r dist/KPrompter.app dmg_stage/KPrompter.app
-          ln -s /Applications dmg_stage/Applications
-          hdiutil create -volname "KPrompter" \
-            -srcfolder dmg_stage \
-            -ov -format UDZO \
-            dist/KPrompter-macOS.dmg
+          mkdir -p pkg_root/Applications pkg_scripts
+          cp -r dist/KPrompter.app pkg_root/Applications/KPrompter.app
+          printf '#!/bin/bash\nxattr -dr com.apple.quarantine /Applications/KPrompter.app 2>/dev/null || true\nexit 0\n' > pkg_scripts/postinstall
+          chmod +x pkg_scripts/postinstall
+          pkgbuild \
+            --root pkg_root \
+            --scripts pkg_scripts \
+            --identifier com.ktorres.kprompter \
+            --version ${{ github.ref_name }} \
+            --install-location / \
+            dist/KPrompter-macOS.pkg
 
       - name: Upload
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/KPrompter-macOS.dmg
+          files: dist/KPrompter-macOS.pkg
 
   build-linux:
     runs-on: ubuntu-latest

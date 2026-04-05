@@ -1,0 +1,3 @@
+#!/bin/bash
+xattr -dr com.apple.quarantine /Applications/KPrompter.app 2>/dev/null || true
+exit 0
