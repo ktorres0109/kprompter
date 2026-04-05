@@ -1,0 +1,110 @@
+name: Build & Release
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Generate icon
+        run: python icon_gen.py
+
+      - name: Build .exe
+        run: |
+          pyinstaller --onefile --windowed --icon assets/icon.png --name KPrompter main.py
+
+      - name: Upload Windows build
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ github.event.release.upload_url }}
+          asset_path: dist/KPrompter.exe
+          asset_name: KPrompter-Windows.exe
+          asset_content_type: application/octet-stream
+
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Generate icon
+        run: python icon_gen.py
+
+      - name: Build .app
+        run: |
+          pyinstaller --onefile --windowed --icon assets/icon.png --name KPrompter main.py
+
+      - name: Zip the app
+        run: zip -r dist/KPrompter-macOS.zip dist/KPrompter
+
+      - name: Upload macOS build
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ github.event.release.upload_url }}
+          asset_path: dist/KPrompter-macOS.zip
+          asset_name: KPrompter-macOS.zip
+          asset_content_type: application/zip
+
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xclip xdotool python3-tk
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Generate icon
+        run: python icon_gen.py
+
+      - name: Build binary
+        run: |
+          pyinstaller --onefile --icon assets/icon.png --name KPrompter main.py
+
+      - name: Upload Linux build
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ github.event.release.upload_url }}
+          asset_path: dist/KPrompter
+          asset_name: KPrompter-Linux
+          asset_content_type: application/octet-stream
