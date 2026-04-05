@@ -62,6 +62,12 @@ jobs:
           --add-data "assets/icon.png:assets"
           main.py
 
+      - name: Inject Info.plist
+        run: cp Info.plist dist/KPrompter.app/Contents/Info.plist
+
+      - name: Strip quarantine
+        run: xattr -cr dist/KPrompter.app
+
       - name: Zip app bundle
         run: cd dist && zip -r KPrompter-macOS.zip KPrompter.app
 

@@ -15,7 +15,7 @@ SYSTEM = platform.system()
 BG       = "#0d0f13"
 BG2      = "#13161c"
 BG3      = "#1e2235"   # input bg — clearly distinct from window bg
-BTN_SEC  = "#252b3b"   # secondary button bg
+BTN_SEC  = "#2e3a52"   # secondary button bg — clearly visible on dark bg
 BORDER   = "#363d52"   # brighter so fields are visible
 ACCENT   = "#4af0a0"
 ACCENT2  = "#3dd8f0"
@@ -49,12 +49,13 @@ def _style_root(root, title, w, h, resizable=False):
 def _btn(parent, text, command, accent=True, small=False, **kw):
     fg  = BG   if accent else TEXT
     bg  = ACCENT if accent else BTN_SEC
-    hov = "#2dd880" if accent else "#2e3650"
+    hov = "#2dd880" if accent else "#3a4a68"
     font = (*FONT_UI[:2], "bold") if accent else FONT_UI
     if small:
         font = (FONT_UI[0], 10)
     b = tk.Button(parent, text=text, command=command,
-                  bg=bg, fg=fg, activebackground=hov, activeforeground=fg,
+                  bg=bg, fg=fg, activebackground=hov, activeforeground=TEXT,
+                  disabledforeground=TEXT_DIM,
                   font=font, relief="flat", bd=0,
                   padx=10 if small else 14, pady=4 if small else 7,
                   cursor="hand2", **kw)
@@ -185,7 +186,7 @@ class SetupWizard:
         tk.Frame(self.container, bg=BG, height=14).pack()
 
     def _nav(self, back=True, next_text="Continue →", next_cmd=None):
-        row = tk.Frame(self.container, bg=BG)
+        row = tk.Frame(self.container, bg=BG, pady=4)
         row.pack(side="bottom", fill="x", pady=(12, 0))
         if back and self.step > 0:
             _btn(row, "← Back", self._back, accent=False).pack(side="left")
