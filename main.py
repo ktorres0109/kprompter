@@ -121,6 +121,9 @@ class KPrompter:
                 paste_text(result, original_cb)
                 self._conversation.append({"role": "user", "content": text})
                 self._conversation.append({"role": "assistant", "content": result})
+                # Cap history to avoid token overflow (keep last 20 messages = 10 turns)
+                if len(self._conversation) > 20:
+                    self._conversation = self._conversation[-20:]
         finally:
             self._busy = False
 
@@ -198,6 +201,8 @@ class KPrompter:
             paste_text(result, original_cb)
             self._conversation.append({"role": "user", "content": text})
             self._conversation.append({"role": "assistant", "content": result})
+            if len(self._conversation) > 20:
+                self._conversation = self._conversation[-20:]
         except Exception as e:
             self._show_error(str(e))
         finally:
@@ -212,9 +217,9 @@ class KPrompter:
             self._spinner = None
 
     def _show_error(self, msg):
+        import tkinter.messagebox as mb
         if self._root:
-            self._root.after(0, lambda: __import__("tkinter.messagebox",
-                fromlist=["showerror"]).showerror("KPrompter Error", msg))
+            self._root.after(0, lambda m=msg: mb.showerror("KPrompter Error", m))
 
     def open_settings(self):
         if self._root:
