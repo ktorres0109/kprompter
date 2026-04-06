@@ -73,10 +73,8 @@ jobs:
           find dist/KPrompter.app -name "._*" -delete
           xattr -cr dist/KPrompter.app
 
-      - name: Zip with ditto (preserves .app structure)
-        run: |
-          cd dist
-          ditto -c -k --sequesterRsrc --keepParent KPrompter.app KPrompter-macOS.zip
+      - name: Zip the app
+        run: zip -r dist/KPrompter-macOS.zip dist/KPrompter.app
 
       - name: Verify zip size (must be > 30MB)
         run: |
