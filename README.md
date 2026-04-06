@@ -22,7 +22,16 @@ It also knows when you're mid-project. First message? Full setup. Continuing? Ju
 
 ## Quick Install
 
-### macOS / Linux
+### macOS
+
+1. Download `KPrompter-macOS.zip` from the [latest release](https://github.com/ktorres0109/kprompter/releases/latest)
+2. Double-click the zip to unzip — you'll get `KPrompter.app`
+3. Drag `KPrompter.app` to your **Applications** folder
+4. **First launch only:** right-click (or Control-click) `KPrompter.app` → click **Open** → click **Open** again in the dialog
+
+> macOS blocks apps from unknown developers by default. Right-click → Open bypasses this once. After that, double-click works normally.
+
+### macOS / Linux (from source)
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/ktorres0109/kprompter/main/install.sh | bash
@@ -269,6 +278,18 @@ You can set any combo during setup or change it later in Settings → General.
 ---
 
 ## Troubleshooting
+
+**"KPrompter is damaged" or "cannot be opened" on macOS**
+
+This is macOS Gatekeeper blocking unsigned apps downloaded from the internet. Fix it in one step:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/KPrompter.app
+```
+
+Or right-click the app → **Open** → **Open** in the dialog. Only needed once.
+
+---
 
 **Hotkey not working on Linux**
 

@@ -4,7 +4,6 @@ on:
   release:
     types: [published]
 
-# Give the token write access to create release assets
 permissions:
   contents: write
 
@@ -53,7 +52,7 @@ jobs:
       - name: Generate icon
         run: python icon_gen.py
 
-      - name: Build app
+      - name: Build .app bundle
         run: >
           pyinstaller --onedir --windowed
           --name KPrompter
@@ -64,34 +63,34 @@ jobs:
           --osx-bundle-identifier "com.ktorres.kprompter"
           main.py
 
-      - name: Inject Info.plist + icon
+      - name: Inject Info.plist and icon
         run: |
           cp Info.plist dist/KPrompter.app/Contents/Info.plist
           cp assets/icon.icns dist/KPrompter.app/Contents/Resources/icon.icns
 
-      - name: Strip quarantine from app
+      - name: Clean resource forks and strip quarantine
         run: |
           find dist/KPrompter.app -name "._*" -delete
           xattr -cr dist/KPrompter.app
 
-      - name: Build PKG installer
+      - name: Zip with ditto (preserves .app structure)
         run: |
-          mkdir -p pkg_root/Applications pkg_scripts
-          cp -r dist/KPrompter.app pkg_root/Applications/KPrompter.app
-          printf '#!/bin/bash\nxattr -dr com.apple.quarantine /Applications/KPrompter.app 2>/dev/null || true\nexit 0\n' > pkg_scripts/postinstall
-          chmod +x pkg_scripts/postinstall
-          pkgbuild \
-            --root pkg_root \
-            --scripts pkg_scripts \
-            --identifier com.ktorres.kprompter \
-            --version ${{ github.ref_name }} \
-            --install-location / \
-            dist/KPrompter-macOS.pkg
+          cd dist
+          ditto -c -k --sequesterRsrc --keepParent KPrompter.app KPrompter-macOS.zip
+
+      - name: Verify zip size (must be > 30MB)
+        run: |
+          SIZE=$(stat -f%z dist/KPrompter-macOS.zip)
+          echo "Zip size: $SIZE bytes"
+          if [ "$SIZE" -lt 31457280 ]; then
+            echo "ERROR: zip is too small ($SIZE bytes) — bundle likely corrupt"
+            exit 1
+          fi
 
       - name: Upload
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/KPrompter-macOS.pkg
+          files: dist/KPrompter-macOS.zip
 
   build-linux:
     runs-on: ubuntu-latest
