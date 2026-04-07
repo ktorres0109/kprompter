@@ -5,3 +5,6 @@ __pycache__/
 *.spec
 assets/icon.png
 assets/icon.svg
+.venv/
+dist/
+build/
