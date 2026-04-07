@@ -22,7 +22,15 @@ It also knows when you're mid-project. First message? Full setup. Continuing? Ju
 
 ## Quick Install
 
-### macOS
+### macOS (Homebrew) - Recommended
+
+The easiest way to install on macOS without getting Apple's Gatekeeper "app is damaged" warnings is to use Homebrew:
+
+```bash
+brew install --cask https://raw.githubusercontent.com/ktorres0109/kprompter/main/Casks/kprompter.rb
+```
+
+### macOS (Manual Install)
 
 1. Download `KPrompter.dmg` from the [latest release](https://github.com/ktorres0109/kprompter/releases/latest)
 2. Double-click the `.dmg` file to mount it
