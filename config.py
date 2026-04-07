@@ -115,35 +115,27 @@ PROVIDERS = {
 }
 
 
-_openrouter_cache_lock = threading.Lock()
 _openrouter_fetched = False
 
-def _fetch_openrouter_models_bg():
+def _fetch_openrouter_models_sync():
     global _openrouter_fetched
-    if not requests:
+    if not requests or _openrouter_fetched:
         return
     try:
-        response = requests.get("https://openrouter.ai/api/v1/models", timeout=5)
+        response = requests.get("https://openrouter.ai/api/v1/models", timeout=3)
         data = response.json().get('data', [])
-
-        free_models = []
-        for m in data:
-            pricing = m.get('pricing')
-            if pricing and isinstance(pricing, dict) and pricing.get('prompt') == "0":
-                free_models.append(m['id'])
-
+        free_models = [m['id'] for m in data if m.get('pricing', {}).get('prompt', "-1") == "0"]
         if free_models:
-            with _openrouter_cache_lock:
-                current_ids = {m["id"] for m in PROVIDERS["openrouter"]["models"]}
-                for mid in reversed(free_models):
-                    if mid not in current_ids:
-                        name_parts = mid.split("/")[-1].replace("-", " ").title()
-                        label = f"{name_parts} (free live)"
-                        PROVIDERS["openrouter"]["models"].insert(0, {"label": label, "id": mid, "free": True})
+            current_ids = {m["id"] for m in PROVIDERS["openrouter"]["models"]}
+            # Reverse order to keep most popular models at the top when inserting at index 0
+            for mid in reversed(free_models):
+                if mid not in current_ids:
+                    name_parts = mid.split("/")[-1].replace("-", " ").title()
+                    label = f"{name_parts} (free live)"
+                    PROVIDERS["openrouter"]["models"].insert(0, {"label": label, "id": mid, "free": True})
+        _openrouter_fetched = True
     except Exception:
         pass
-    finally:
-        _openrouter_fetched = True
 
 
 def get_best_model(provider: str) -> str:
@@ -152,12 +144,9 @@ def get_best_model(provider: str) -> str:
 
 def get_model_labels(provider: str) -> list:
     """Returns list of (label, model_id, is_free) tuples for UI dropdowns."""
-    if provider == "openrouter" and not getattr(get_model_labels, "_fetching", False) and not _openrouter_fetched and requests:
-        get_model_labels._fetching = True
-        t = threading.Thread(target=_fetch_openrouter_models_bg, daemon=True)
-        t.start()
-    with _openrouter_cache_lock:
-        return [(m["label"], m["id"], m["free"]) for m in PROVIDERS.get(provider, {}).get("models", [])]
+    if provider == "openrouter" and not _openrouter_fetched:
+        _fetch_openrouter_models_sync()
+    return [(m["label"], m["id"], m["free"]) for m in PROVIDERS.get(provider, {}).get("models", [])]
 
 
 def load_config() -> dict:
