@@ -27,7 +27,8 @@ It also knows when you're mid-project. First message? Full setup. Continuing? Ju
 The easiest way to install on macOS without getting Apple's Gatekeeper "app is damaged" warnings is to use Homebrew:
 
 ```bash
-brew install --cask https://raw.githubusercontent.com/ktorres0109/kprompter/main/Casks/kprompter.rb
+brew tap ktorres0109/kprompter https://github.com/ktorres0109/kprompter
+brew install --cask kprompter
 ```
 
 ### macOS (Manual Install)
