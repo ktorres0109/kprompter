@@ -1,8 +1,14 @@
 import json
 import os
 import platform
+import threading
 from pathlib import Path
 from datetime import datetime
+
+try:
+    import requests
+except ImportError:
+    requests = None
 
 def get_config_dir() -> Path:
     system = platform.system()
@@ -39,21 +45,18 @@ PROVIDERS = {
     "openrouter": {
         "name": "OpenRouter",
         "base_url": "https://openrouter.ai/api/v1",
-        "best_free": "meta-llama/llama-3.3-70b-instruct:free",
+        "best_free": "google/gemini-3.1-flash-lite:free",
         "models": [
-            {"label": "Llama 3.3 70B (free)",          "id": "meta-llama/llama-3.3-70b-instruct:free",            "free": True},
-            {"label": "Llama 4 Maverick (free)",        "id": "meta-llama/llama-4-maverick:free",                  "free": True},
-            {"label": "Llama 4 Scout (free)",           "id": "meta-llama/llama-4-scout:free",                     "free": True},
-            {"label": "DeepSeek V3 (free)",             "id": "deepseek/deepseek-chat-v3-0324:free",               "free": True},
-            {"label": "DeepSeek R1 Zero (free)",        "id": "deepseek/deepseek-r1-zero:free",                    "free": True},
-            {"label": "Mistral Small 3.1 24B (free)",   "id": "mistralai/mistral-small-3.1-24b-instruct:free",     "free": True},
-            {"label": "Qwen3 Coder 480B (free)",        "id": "qwen/qwen3-coder:free",                             "free": True},
-            {"label": "Gemini 2.5 Pro Exp (free)",      "id": "google/gemini-2.5-pro-exp-03-25:free",              "free": True},
-            {"label": "GPT-4o mini",                    "id": "openai/gpt-4o-mini",                                "free": False},
-            {"label": "GPT-4o",                         "id": "openai/gpt-4o",                                     "free": False},
-            {"label": "Claude Haiku 4.5",               "id": "anthropic/claude-haiku-4-5",                        "free": False},
-            {"label": "Claude Sonnet 4.6",              "id": "anthropic/claude-sonnet-4-6",                       "free": False},
-            {"label": "Gemini 2.5 Flash",               "id": "google/gemini-2.5-flash",                           "free": False},
+            {"label": "Gemini 3.1 Flash Lite (free)",  "id": "google/gemini-3.1-flash-lite:free",                 "free": True},
+            {"label": "Llama 4 Maverick (free)",       "id": "meta-llama/llama-4-maverick:free",                  "free": True},
+            {"label": "Llama 4 Scout (free)",          "id": "meta-llama/llama-4-scout:free",                     "free": True},
+            {"label": "DeepSeek V3 (free)",            "id": "deepseek/deepseek-chat-v3-0324:free",               "free": True},
+            {"label": "DeepSeek R1 Zero (free)",       "id": "deepseek/deepseek-r1-zero:free",                    "free": True},
+            {"label": "Mistral Small 3.1 24B (free)",  "id": "mistralai/mistral-small-3.1-24b-instruct:free",     "free": True},
+            {"label": "Qwen3 Coder 480B (free)",       "id": "qwen/qwen3-coder:free",                             "free": True},
+            {"label": "GPT-5.4 Mini",                  "id": "openai/gpt-5.4-mini",                               "free": False},
+            {"label": "Claude 4.5 Haiku",              "id": "anthropic/claude-4-5-haiku",                        "free": False},
+            {"label": "Claude 4.6 Sonnet",             "id": "anthropic/claude-4-6-sonnet",                       "free": False},
         ],
         "key_url": "https://openrouter.ai/keys",
         "setup_tip": "Recommended. Set a $0 credit limit to block paid models entirely.",
@@ -61,11 +64,11 @@ PROVIDERS = {
     "anthropic": {
         "name": "Anthropic",
         "base_url": "https://api.anthropic.com/v1",
-        "best_free": "claude-haiku-4-5-20251001",
+        "best_free": "claude-4-5-haiku-latest",
         "models": [
-            {"label": "Claude Haiku 4.5 (cheapest)",   "id": "claude-haiku-4-5-20251001",   "free": False},
-            {"label": "Claude Sonnet 4.6",             "id": "claude-sonnet-4-6",            "free": False},
-            {"label": "Claude Opus 4.6",               "id": "claude-opus-4-6",              "free": False},
+            {"label": "Claude 4.5 Haiku (cheapest)",   "id": "claude-4-5-haiku-latest",   "free": False},
+            {"label": "Claude 4.6 Sonnet",             "id": "claude-4-6-sonnet-latest",  "free": False},
+            {"label": "Claude 4.6 Opus",               "id": "claude-4-6-opus-latest",    "free": False},
         ],
         "key_url": "https://console.anthropic.com/settings/keys",
         "setup_tip": "Paid service. Set a spending limit under Account → Billing.",
@@ -73,13 +76,10 @@ PROVIDERS = {
     "openai": {
         "name": "OpenAI",
         "base_url": "https://api.openai.com/v1",
-        "best_free": "gpt-4o-mini",
+        "best_free": "gpt-5.4-mini",
         "models": [
-            {"label": "GPT-4o mini (cheapest)",   "id": "gpt-4o-mini",    "free": False},
-            {"label": "GPT-4.1 mini",             "id": "gpt-4.1-mini",   "free": False},
-            {"label": "GPT-4o",                   "id": "gpt-4o",         "free": False},
-            {"label": "GPT-4.1",                  "id": "gpt-4.1",        "free": False},
-            {"label": "o3 mini",                  "id": "o3-mini",        "free": False},
+            {"label": "GPT-5.4 Mini (cheapest)",  "id": "gpt-5.4-mini",   "free": False},
+            {"label": "GPT-5.4",                  "id": "gpt-5.4",        "free": False},
             {"label": "o4 mini",                  "id": "o4-mini",        "free": False},
         ],
         "key_url": "https://platform.openai.com/api-keys",
@@ -88,14 +88,11 @@ PROVIDERS = {
     "gemini": {
         "name": "Google Gemini",
         "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
-        "best_free": "gemini-2.5-flash",
+        "best_free": "gemini-3.1-flash-lite",
         "models": [
-            {"label": "Gemini 2.5 Flash (free tier)",     "id": "gemini-2.5-flash",       "free": True},
-            {"label": "Gemini 2.5 Flash Lite (free tier)","id": "gemini-2.5-flash-lite",  "free": True},
-            {"label": "Gemini 2.5 Pro (free tier)",       "id": "gemini-2.5-pro",         "free": True},
-            {"label": "Gemini 3 Flash Preview",           "id": "gemini-3-flash-preview",  "free": False},
-            {"label": "Gemini 3.1 Flash Lite Preview",    "id": "gemini-3.1-flash-lite-preview", "free": False},
-            {"label": "Gemini 3.1 Pro Preview",           "id": "gemini-3.1-pro-preview",  "free": False},
+            {"label": "Gemini 3.1 Flash Lite (free tier)", "id": "gemini-3.1-flash-lite",  "free": True},
+            {"label": "Gemini 3 Flash (free tier)",        "id": "gemini-3-flash",         "free": True},
+            {"label": "Gemini 3 Pro",                      "id": "gemini-3-pro",           "free": False},
         ],
         "key_url": "https://aistudio.google.com/apikey",
         "setup_tip": "Get a free key at aistudio.google.com. Set billing limits just in case.",
@@ -103,21 +100,50 @@ PROVIDERS = {
     "ollama": {
         "name": "Ollama (Local)",
         "base_url": "http://localhost:11434/v1",
-        "best_free": "llama3.2",
+        "best_free": "gemma4",
         "models": [
-            {"label": "Llama 3.2 3B",    "id": "llama3.2",       "free": True},
-            {"label": "Llama 3.1 8B",    "id": "llama3.1",       "free": True},
-            {"label": "Llama 3 8B",      "id": "llama3",         "free": True},
-            {"label": "Mistral 7B",      "id": "mistral",        "free": True},
-            {"label": "Gemma 3 4B",      "id": "gemma3:4b",      "free": True},
-            {"label": "Phi-4 Mini",      "id": "phi4-mini",      "free": True},
-            {"label": "Qwen 2.5 7B",     "id": "qwen2.5",        "free": True},
-            {"label": "DeepSeek R1 7B",  "id": "deepseek-r1:7b", "free": True},
+            {"label": "Gemma 4 9B",      "id": "gemma4",         "free": True},
+            {"label": "Gemma 4 27B",     "id": "gemma4:27b",     "free": True},
+            {"label": "Qwen 3.5 7B",     "id": "qwen3.5",        "free": True},
+            {"label": "Qwen 3.5 32B",    "id": "qwen3.5:32b",    "free": True},
+            {"label": "Llama 4 8B",      "id": "llama4",         "free": True},
+            {"label": "Mistral 3 7B",    "id": "mistral3",       "free": True},
         ],
         "key_url": "https://ollama.com/download",
-        "setup_tip": "No API key needed. Run: ollama pull llama3.2",
+        "setup_tip": "No API key needed. Run: ollama pull gemma4",
     },
 }
+
+
+_openrouter_cache_lock = threading.Lock()
+_openrouter_fetched = False
+
+def _fetch_openrouter_models_bg():
+    global _openrouter_fetched
+    if not requests:
+        return
+    try:
+        response = requests.get("https://openrouter.ai/api/v1/models", timeout=5)
+        data = response.json().get('data', [])
+
+        free_models = []
+        for m in data:
+            pricing = m.get('pricing')
+            if pricing and isinstance(pricing, dict) and pricing.get('prompt') == "0":
+                free_models.append(m['id'])
+
+        if free_models:
+            with _openrouter_cache_lock:
+                current_ids = {m["id"] for m in PROVIDERS["openrouter"]["models"]}
+                for mid in reversed(free_models):
+                    if mid not in current_ids:
+                        name_parts = mid.split("/")[-1].replace("-", " ").title()
+                        label = f"{name_parts} (free live)"
+                        PROVIDERS["openrouter"]["models"].insert(0, {"label": label, "id": mid, "free": True})
+    except Exception:
+        pass
+    finally:
+        _openrouter_fetched = True
 
 
 def get_best_model(provider: str) -> str:
@@ -126,7 +152,12 @@ def get_best_model(provider: str) -> str:
 
 def get_model_labels(provider: str) -> list:
     """Returns list of (label, model_id, is_free) tuples for UI dropdowns."""
-    return [(m["label"], m["id"], m["free"]) for m in PROVIDERS.get(provider, {}).get("models", [])]
+    if provider == "openrouter" and not getattr(get_model_labels, "_fetching", False) and not _openrouter_fetched and requests:
+        get_model_labels._fetching = True
+        t = threading.Thread(target=_fetch_openrouter_models_bg, daemon=True)
+        t.start()
+    with _openrouter_cache_lock:
+        return [(m["label"], m["id"], m["free"]) for m in PROVIDERS.get(provider, {}).get("models", [])]
 
 
 def load_config() -> dict:
