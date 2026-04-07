@@ -1,8 +1,14 @@
 import json
 import os
 import platform
+import threading
 from pathlib import Path
 from datetime import datetime
+
+try:
+    import requests
+except ImportError:
+    requests = None
 
 def get_config_dir() -> Path:
     system = platform.system()
@@ -109,13 +115,41 @@ PROVIDERS = {
 }
 
 
+_openrouter_cache_lock = threading.Lock()
+_openrouter_fetched = False
+
+def _fetch_openrouter_models_bg():
+    global _openrouter_fetched
+    if not requests:
+        return
+    try:
+        response = requests.get("https://openrouter.ai/api/v1/models", timeout=5)
+        data = response.json().get('data', [])
+        free_models = [m['id'] for m in data if m.get('pricing', {}).get('prompt', "-1") == "0"]
+        if free_models:
+            with _openrouter_cache_lock:
+                current_ids = {m["id"] for m in PROVIDERS["openrouter"]["models"]}
+                for mid in free_models:
+                    if mid not in current_ids:
+                        name_parts = mid.split("/")[-1].replace("-", " ").title()
+                        label = f"{name_parts} (free live)"
+                        PROVIDERS["openrouter"]["models"].insert(0, {"label": label, "id": mid, "free": True})
+            _openrouter_fetched = True
+    except Exception:
+        pass
+
+
 def get_best_model(provider: str) -> str:
     return PROVIDERS.get(provider, {}).get("best_free", "")
 
 
 def get_model_labels(provider: str) -> list:
     """Returns list of (label, model_id, is_free) tuples for UI dropdowns."""
-    return [(m["label"], m["id"], m["free"]) for m in PROVIDERS.get(provider, {}).get("models", [])]
+    if provider == "openrouter" and not _openrouter_fetched and requests:
+        t = threading.Thread(target=_fetch_openrouter_models_bg, daemon=True)
+        t.start()
+    with _openrouter_cache_lock:
+        return [(m["label"], m["id"], m["free"]) for m in PROVIDERS.get(provider, {}).get("models", [])]
 
 
 def load_config() -> dict:
