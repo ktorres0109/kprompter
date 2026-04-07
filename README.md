@@ -24,8 +24,8 @@ It also knows when you're mid-project. First message? Full setup. Continuing? Ju
 
 ### macOS
 
-1. Download `KPrompter-macOS.zip` from the [latest release](https://github.com/ktorres0109/kprompter/releases/latest)
-2. Double-click the zip to unzip — you'll get `KPrompter.app`
+1. Download `KPrompter.dmg` from the [latest release](https://github.com/ktorres0109/kprompter/releases/latest)
+2. Double-click the `.dmg` file to mount it
 3. Drag `KPrompter.app` to your **Applications** folder
 4. **First launch only:** right-click (or Control-click) `KPrompter.app` → click **Open** → click **Open** again in the dialog
 
@@ -281,13 +281,13 @@ You can set any combo during setup or change it later in Settings → General.
 
 **"KPrompter is damaged" or "cannot be opened" on macOS**
 
-This is macOS Gatekeeper blocking unsigned apps downloaded from the internet. Fix it in one step:
+This error typically occurs when downloading apps from outside the App Store or if the app's signature needs to be verified. Fix it in one step using Terminal:
 
 ```bash
-xattr -dr com.apple.quarantine /Applications/KPrompter.app
+xattr -cr /Applications/KPrompter.app
 ```
 
-Or right-click the app → **Open** → **Open** in the dialog. Only needed once.
+Alternatively, you can right-click (or Control-click) the app in your Applications folder → click **Open** → click **Open** again in the dialog to bypass Gatekeeper. This only needs to be done once.
 
 ---
 

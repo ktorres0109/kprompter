@@ -73,22 +73,28 @@ jobs:
           find dist/KPrompter.app -name "._*" -delete
           xattr -cr dist/KPrompter.app
 
-      - name: Zip the app
-        run: zip -r dist/KPrompter-macOS.zip dist/KPrompter.app
+      - name: Ad-hoc sign the app
+        run: codesign --force --deep --sign - dist/KPrompter.app
 
-      - name: Verify zip size (must be > 30MB)
+      - name: Create DMG
         run: |
-          SIZE=$(stat -f%z dist/KPrompter-macOS.zip)
-          echo "Zip size: $SIZE bytes"
+          mkdir -p dist/dmg
+          cp -r dist/KPrompter.app dist/dmg/
+          hdiutil create -volname "KPrompter" -srcfolder dist/dmg -ov -format UDZO dist/KPrompter.dmg
+
+      - name: Verify DMG size (must be > 30MB)
+        run: |
+          SIZE=$(stat -f%z dist/KPrompter.dmg)
+          echo "DMG size: $SIZE bytes"
           if [ "$SIZE" -lt 31457280 ]; then
-            echo "ERROR: zip is too small ($SIZE bytes) — bundle likely corrupt"
+            echo "ERROR: DMG is too small ($SIZE bytes) — bundle likely corrupt"
             exit 1
           fi
 
       - name: Upload
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/KPrompter-macOS.zip
+          files: dist/KPrompter.dmg
 
   build-linux:
     runs-on: ubuntu-latest
