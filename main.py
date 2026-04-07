@@ -121,9 +121,11 @@ class KPrompter:
                 paste_text(result, original_cb)
                 self._conversation.append({"role": "user", "content": text})
                 self._conversation.append({"role": "assistant", "content": result})
-                # Cap history to avoid token overflow (keep last 20 messages = 10 turns)
-                if len(self._conversation) > 20:
-                    self._conversation = self._conversation[-20:]
+                # Efficiency: Cap history to last 6 messages (3 turns) to save tokens.
+                # In "continuation" mode, LLMs rarely need more than the last few interactions
+                # to understand the immediate context, drastically cutting API costs.
+                if len(self._conversation) > 6:
+                    self._conversation = self._conversation[-6:]
         finally:
             self._busy = False
 
@@ -201,8 +203,8 @@ class KPrompter:
             paste_text(result, original_cb)
             self._conversation.append({"role": "user", "content": text})
             self._conversation.append({"role": "assistant", "content": result})
-            if len(self._conversation) > 20:
-                self._conversation = self._conversation[-20:]
+            if len(self._conversation) > 6:
+                self._conversation = self._conversation[-6:]
         except Exception as e:
             self._show_error(str(e))
         finally:
