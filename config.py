@@ -76,9 +76,12 @@ PROVIDERS = {
     "openai": {
         "name": "OpenAI",
         "base_url": "https://api.openai.com/v1",
-        "best_free": "gpt-5.4-mini",
+        "best_free": "gpt-5-nano",
         "models": [
-            {"label": "GPT-5.4 Mini (cheapest)",  "id": "gpt-5.4-mini",   "free": False},
+            {"label": "GPT-5 Nano (cheapest)",    "id": "gpt-5-nano",     "free": False},
+            {"label": "GPT-5 Mini",               "id": "gpt-5-mini",     "free": False},
+            {"label": "GPT-5",                    "id": "gpt-5",          "free": False},
+            {"label": "GPT-5.4 Mini",             "id": "gpt-5.4-mini",   "free": False},
             {"label": "GPT-5.4",                  "id": "gpt-5.4",        "free": False},
             {"label": "o4 mini",                  "id": "o4-mini",        "free": False},
         ],
@@ -90,12 +93,13 @@ PROVIDERS = {
         "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
         "best_free": "gemini-3.1-flash-lite",
         "models": [
-            {"label": "Gemini 3.1 Flash Lite (free tier)", "id": "gemini-3.1-flash-lite",  "free": True},
-            {"label": "Gemini 3 Flash (free tier)",        "id": "gemini-3-flash",         "free": True},
-            {"label": "Gemini 3 Pro",                      "id": "gemini-3-pro",           "free": False},
+            {"label": "Gemini 3.1 Flash Lite (free tier)", "id": "gemini-3.1-flash-lite", "free": True},
+            {"label": "Gemini 3 Flash (free tier)",        "id": "gemini-3-flash",        "free": True},
+            {"label": "Gemini 3.1 Pro Preview",            "id": "gemini-3.1-pro-preview","free": False},
+            {"label": "Gemini 2.5 Flash-Lite (free tier)", "id": "gemini-2.5-flash-lite", "free": True},
         ],
         "key_url": "https://aistudio.google.com/apikey",
-        "setup_tip": "Get a free key at aistudio.google.com. Set billing limits just in case.",
+        "setup_tip": "Get a free key at aistudio.google.com. Ensure you are on the 'Free' billing tier.",
     },
     "ollama": {
         "name": "Ollama (Local)",
