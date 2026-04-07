@@ -257,10 +257,10 @@ class KPrompter:
             on_log=self.open_settings,
             on_quit=self.quit_app,
         )
-        if self._tray and SYSTEM != "Darwin":
+        if self._tray:
             threading.Thread(target=self._tray.run, daemon=True).start()
         else:
-            print("[KPrompter] Tray disabled or not available — running hotkey daemon in background.")
+            print("[KPrompter] pystray not available — running without tray icon.")
 
         print("[KPrompter] Running.")
         self._root.mainloop()
