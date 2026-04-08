@@ -505,12 +505,21 @@ class ResultPopup:
         # Footer
         ftr = tk.Frame(root, bg=BG2, padx=14, pady=8)
         ftr.pack(fill="x")
+
+        # Add settings button for macOS users since tray icon is disabled
+        if platform.system() == "Darwin":
+            _btn(ftr, "⚙ Settings", self._open_settings, accent=False).pack(side="left")
+
         if is_question:
             _btn(ftr, "Send Answer →", self._send_answer).pack(side="right")
             _btn(ftr, "Cancel", root.destroy, accent=False).pack(side="right", padx=6)
         else:
             _btn(ftr, "Dismiss", root.destroy, accent=False).pack(side="right")
             _btn(ftr, "Copy", self._copy, accent=False).pack(side="right", padx=6)
+
+    def _open_settings(self):
+        self.root.destroy()
+        SettingsWindow()
 
     def _copy(self):
         text = self._st.get("1.0", "end").strip()

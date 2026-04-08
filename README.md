@@ -31,6 +31,11 @@ brew tap ktorres0109/kprompter https://github.com/ktorres0109/kprompter
 brew install --cask kprompter
 ```
 
+**To reinstall or update later if something goes wrong:**
+```bash
+brew reinstall --cask kprompter
+```
+
 ### macOS (Manual Install)
 
 1. Download `KPrompter.dmg` from the [latest release](https://github.com/ktorres0109/kprompter/releases/latest)
@@ -423,4 +428,4 @@ MIT — do whatever you want, just don't remove attribution.
 
 ## Credits
 
-Built by [Kelvin Salinas](https://github.com/ktorres0109). Powered by your AI of choice.
+Built by [Kelvin Torres](https://github.com/ktorres0109). Powered by your AI of choice.
