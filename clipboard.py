@@ -10,8 +10,15 @@ def get_selected_text() -> tuple:
     original = _get_clipboard()
     _set_clipboard("")
     _send_copy()
-    time.sleep(0.2)   # wait for copy to land
-    text = _get_clipboard()
+
+    # Poll clipboard to catch text immediately when it arrives (max 1.5s)
+    text = ""
+    for _ in range(30):
+        time.sleep(0.05)
+        text = _get_clipboard()
+        if text:
+            break
+
     return text, original
 
 
