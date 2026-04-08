@@ -238,17 +238,17 @@ class KPrompter:
     def run(self):
         gen_icon()
 
+        self._root = tk.Tk()
+        self._root.withdraw()
+        self._root.title("KPrompter")
+
         if is_first_run():
-            wizard = SetupWizard()
-            wizard.run()
+            wizard = SetupWizard(parent=self._root)
+            self._root.wait_window(wizard.root)
 
         cfg = load_config()
         if not cfg.get("api_key") and cfg.get("provider") != "ollama":
             print("[KPrompter] Warning: No API key set. Open Settings to add one.")
-
-        self._root = tk.Tk()
-        self._root.withdraw()
-        self._root.title("KPrompter")
 
         self._start_hotkey_listener()
 
