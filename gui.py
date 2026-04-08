@@ -138,8 +138,12 @@ def _model_combobox(parent, provider: str, model_var: tk.StringVar) -> ttk.Combo
 # ══════════════════════════════════════════════════════════════════════════════
 
 class SetupWizard:
-    def __init__(self):
-        self.root = tk.Tk()
+    def __init__(self, parent_root=None):
+        self.parent_root = parent_root
+        if self.parent_root:
+            self.root = tk.Toplevel(self.parent_root)
+        else:
+            self.root = tk.Tk()
         _style_root(self.root, "KPrompter — Setup", 580, 580)
         self.cfg = load_config()
         self.step = 0
@@ -436,7 +440,10 @@ class SetupWizard:
         self.cfg = cfg
 
     def run(self):
-        self.root.mainloop()
+        if self.parent_root:
+            self.root.wait_window()
+        else:
+            self.root.mainloop()
 
 
 # ══════════════════════════════════════════════════════════════════════════════

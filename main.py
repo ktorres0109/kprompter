@@ -238,36 +238,36 @@ class KPrompter:
     def run(self):
         gen_icon()
 
+        self._root = tk.Tk()
+        self._root.withdraw()
+        self._root.title("KPrompter")
+
         if is_first_run():
-            wizard = SetupWizard()
+            wizard = SetupWizard(parent_root=self._root)
             wizard.run()
 
         cfg = load_config()
         if not cfg.get("api_key") and cfg.get("provider") != "ollama":
             print("[KPrompter] Warning: No API key set. Open Settings to add one.")
 
-        self._root = tk.Tk()
-        self._root.withdraw()
-        self._root.title("KPrompter")
-
         self._start_hotkey_listener()
 
-        # macOS: Disable tray icon to prevent Tkinter thread conflicts that cause endless crashing loops
-        if SYSTEM != "Darwin":
-            self._tray = build_tray(
-                on_settings=self.open_settings,
-                on_log=self.open_settings,
-                on_quit=self.quit_app,
-            )
-            if self._tray:
-                threading.Thread(target=self._tray.run, daemon=True).start()
-            else:
-                print("[KPrompter] pystray not available — running without tray icon.")
-        else:
-            print("[KPrompter] Running on macOS — tray icon disabled to prevent Tkinter thread lock.")
+        self._tray = build_tray(
+            on_settings=self.open_settings,
+            on_log=self.open_settings,
+            on_quit=self.quit_app,
+        )
 
         print("[KPrompter] Running.")
-        self._root.mainloop()
+        if SYSTEM == "Darwin":
+            if self._tray:
+                # macOS: Launch native app loop inside Tkinter's main loop to keep both on the main thread
+                self._root.after(100, self._tray.run)
+            self._root.mainloop()
+        else:
+            if self._tray:
+                threading.Thread(target=self._tray.run, daemon=True).start()
+            self._root.mainloop()
 
 
 if __name__ == "__main__":
