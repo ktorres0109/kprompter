@@ -252,15 +252,19 @@ class KPrompter:
 
         self._start_hotkey_listener()
 
-        self._tray = build_tray(
-            on_settings=self.open_settings,
-            on_log=self.open_settings,
-            on_quit=self.quit_app,
-        )
-        if self._tray:
-            threading.Thread(target=self._tray.run, daemon=True).start()
+        # macOS: Disable tray icon to prevent Tkinter thread conflicts that cause endless crashing loops
+        if SYSTEM != "Darwin":
+            self._tray = build_tray(
+                on_settings=self.open_settings,
+                on_log=self.open_settings,
+                on_quit=self.quit_app,
+            )
+            if self._tray:
+                threading.Thread(target=self._tray.run, daemon=True).start()
+            else:
+                print("[KPrompter] pystray not available — running without tray icon.")
         else:
-            print("[KPrompter] pystray not available — running without tray icon.")
+            print("[KPrompter] Running on macOS — tray icon disabled to prevent Tkinter thread lock.")
 
         print("[KPrompter] Running.")
         self._root.mainloop()
