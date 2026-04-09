@@ -6,6 +6,9 @@ import threading
 import platform
 import tkinter as tk
 import time
+import os
+import subprocess
+import sys
 
 from config import load_config, is_first_run, PROVIDERS, get_best_model
 from optimizer import optimize
@@ -24,9 +27,71 @@ class KPrompter:
         self._tray = None
         self._root = None
         self._spinner = None
-        self._listener = None
+        self._listener = None       # pynput listener (Linux/Windows)
+        self._hotkey_proc = None    # hotkey subprocess (macOS)
 
-    # ── Hotkey via pynput ────────────────────────────────────────────────────
+    # ── Hotkey listener ───────────────────────────────────────────────────────
+
+    def _start_hotkey_listener(self):
+        cfg = load_config()
+        hotkey_str = cfg.get("hotkey", "ctrl+alt+g")
+        if SYSTEM == "Darwin":
+            self._start_hotkey_macos(hotkey_str)
+        else:
+            self._start_hotkey_pynput(hotkey_str)
+
+    # ── macOS: hotkey via subprocess (avoids AppKit on background thread) ──
+
+    def _start_hotkey_macos(self, hotkey_str):
+        """Launch hotkey_macos.py as a child process with its own Quartz loop.
+
+        On macOS, pynput's Listener starts a background thread that initializes
+        Quartz/AppKit, which crashes because tkinter already owns NSApplication
+        on the main thread.  By running the CGEventTap in a separate *process*,
+        the child has its own AppKit context and the parent stays clean.
+        """
+        script = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                              "hotkey_macos.py")
+        try:
+            self._hotkey_proc = subprocess.Popen(
+                [sys.executable, script, hotkey_str],
+                stdout=subprocess.PIPE,
+                stderr=None,       # let stderr pass through to console
+                bufsize=1,         # line-buffered
+                text=True,
+            )
+        except Exception as e:
+            print(f"[KPrompter] Warning: Could not start macOS hotkey subprocess: {e}")
+            return
+
+        # Make stdout non-blocking so tkinter polling never stalls
+        import fcntl
+        fd = self._hotkey_proc.stdout.fileno()
+        flags = fcntl.fcntl(fd, fcntl.F_GETFL)
+        fcntl.fcntl(fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
+
+        print(f"[KPrompter] Listening for hotkey (macOS subprocess): {hotkey_str}")
+        self._poll_hotkey_subprocess()
+
+    def _poll_hotkey_subprocess(self):
+        """Non-blocking poll of the hotkey subprocess, driven by tkinter after()."""
+        if not hasattr(self, "_hotkey_proc") or self._hotkey_proc is None:
+            return
+        if self._hotkey_proc.poll() is not None:
+            print("[KPrompter] macOS hotkey subprocess exited.")
+            return
+        try:
+            line = self._hotkey_proc.stdout.readline()
+            if line and line.strip() == "HOTKEY":
+                if not self._busy:
+                    threading.Thread(target=self._run_flow, daemon=True).start()
+        except (IOError, OSError):
+            pass  # non-blocking read, no data available
+        # Re-schedule poll (every 100ms — responsive without burning CPU)
+        if self._root:
+            self._root.after(100, self._poll_hotkey_subprocess)
+
+    # ── Linux/Windows: hotkey via pynput (safe — no AppKit conflict) ───────
 
     def _parse_hotkey(self, hotkey_str: str):
         """Parse 'ctrl+alt+g' into a frozenset of pynput keys."""
@@ -47,15 +112,13 @@ class KPrompter:
                 keys.add(kb.KeyCode.from_char(p.lower()))
         return frozenset(keys)
 
-    def _start_hotkey_listener(self):
+    def _start_hotkey_pynput(self, hotkey_str):
         try:
             from pynput import keyboard as kb
         except ImportError:
             print("[KPrompter] Warning: pynput not available. Hotkey disabled.")
             return
 
-        cfg = load_config()
-        hotkey_str = cfg.get("hotkey", "ctrl+alt+g")
         target = self._parse_hotkey(hotkey_str)
         pressed = set()
 
@@ -256,6 +319,16 @@ class KPrompter:
                 self._listener.stop()
             except Exception:
                 pass
+        if self._hotkey_proc:
+            try:
+                self._hotkey_proc.terminate()
+                self._hotkey_proc.wait(timeout=2)
+            except Exception:
+                try:
+                    self._hotkey_proc.kill()
+                except Exception:
+                    pass
+            self._hotkey_proc = None
         if self._tray:
             try:
                 self._tray.stop()
