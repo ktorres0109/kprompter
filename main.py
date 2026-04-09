@@ -335,9 +335,10 @@ class KPrompter:
         self._root = tk.Tk()
         self._root.title("KPrompter")
 
-        if SYSTEM != "Darwin":
-            # Linux/Windows: hide root window — users interact via tray icon
-            self._root.withdraw()
+        # Hide root initially on all platforms:
+        # - Linux/Windows: users interact via tray icon
+        # - macOS: avoid showing an empty window during the setup wizard
+        self._root.withdraw()
 
         if is_first_run():
             wizard = SetupWizard(parent_root=self._root)

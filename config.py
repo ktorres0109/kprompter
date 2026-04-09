@@ -119,6 +119,7 @@ _openrouter_fetched = False
 _openrouter_lock = threading.Lock()
 
 def _fetch_openrouter_models_sync():
+    """Fetch live free models from OpenRouter (called from background thread)."""
     global _openrouter_fetched
     if not requests or _openrouter_fetched:
         return
@@ -141,6 +142,14 @@ def _fetch_openrouter_models_sync():
             _openrouter_fetched = True  # Don't retry on failure
 
 
+def start_openrouter_fetch():
+    """Kick off the OpenRouter model fetch in a background thread so the UI
+    doesn't freeze.  Safe to call multiple times; subsequent calls are no-ops."""
+    if _openrouter_fetched:
+        return
+    threading.Thread(target=_fetch_openrouter_models_sync, daemon=True).start()
+
+
 def get_best_model(provider: str) -> str:
     return PROVIDERS.get(provider, {}).get("best_free", "")
 
@@ -148,7 +157,10 @@ def get_best_model(provider: str) -> str:
 def get_model_labels(provider: str) -> list:
     """Returns list of (label, model_id, is_free) tuples for UI dropdowns."""
     if provider == "openrouter" and not _openrouter_fetched:
-        _fetch_openrouter_models_sync()
+        # Start a background fetch instead of blocking the UI thread.
+        # Return the built-in model list immediately; the combobox can be
+        # refreshed later once the fetch completes.
+        start_openrouter_fetch()
     return [(m["label"], m["id"], m["free"]) for m in PROVIDERS.get(provider, {}).get("models", [])]
 
 

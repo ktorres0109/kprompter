@@ -133,7 +133,10 @@ def _model_combobox(parent, provider: str, model_var: tk.StringVar) -> ttk.Combo
         labels.append(f"{label}{tag}")
 
     style = ttk.Style()
-    style.theme_use("default")
+    # Only switch to "default" theme on non-macOS; on macOS the "aqua" theme
+    # handles native widget rendering and overriding it breaks visuals.
+    if not _is_mac:
+        style.theme_use("default")
     style.configure("Model.TCombobox",
                     fieldbackground=BG3, background=BG3,
                     foreground=TEXT, selectbackground=ACCENT,
@@ -648,7 +651,8 @@ class SettingsWindow:
 
     def _build(self):
         style = ttk.Style()
-        style.theme_use("default")
+        if not _is_mac:
+            style.theme_use("default")
         style.configure("TNotebook", background=BG, borderwidth=0)
         style.configure("TNotebook.Tab", background=BG2, foreground=TEXT_DIM,
                         font=FONT_UI, padding=[16, 8])

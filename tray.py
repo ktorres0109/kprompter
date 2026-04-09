@@ -26,10 +26,10 @@ def build_tray(on_settings, on_log, on_quit):
     menu = pystray.Menu(
         pystray.MenuItem("KPrompter", None, enabled=False),
         pystray.Menu.SEPARATOR,
-        pystray.MenuItem("Settings", lambda: _call(on_settings)),
-        pystray.MenuItem("View Log", lambda: _call(on_log)),
+        pystray.MenuItem("Settings", lambda icon, item: _call(on_settings)),
+        pystray.MenuItem("View Log", lambda icon, item: _call(on_log)),
         pystray.Menu.SEPARATOR,
-        pystray.MenuItem("Quit", lambda: _call(on_quit)),
+        pystray.MenuItem("Quit", lambda icon, item: _call(on_quit)),
     )
 
     try:
