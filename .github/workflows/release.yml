@@ -47,7 +47,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install deps
-        run: pip install -r requirements.txt pyinstaller
+        run: pip install -r requirements.txt pyinstaller pyobjc-framework-Quartz
 
       - name: Generate icon
         run: python icon_gen.py
@@ -60,6 +60,7 @@ jobs:
           --add-data "prompts/default.txt:prompts"
           --add-data "assets/icon.png:assets"
           --add-data "assets/icon.icns:assets"
+          --hidden-import hotkey_macos
           --osx-bundle-identifier "com.ktorres.kprompter"
           main.py
 

@@ -1,5 +1,6 @@
 import json
 import os
+import sys
 import platform
 import threading
 from pathlib import Path
@@ -9,6 +10,19 @@ try:
     import requests
 except ImportError:
     requests = None
+
+
+def get_bundle_dir() -> Path:
+    """Return the base directory for bundled resources.
+
+    Inside a PyInstaller bundle (frozen app), data files added via
+    ``--add-data`` live under ``sys._MEIPASS``.  In a normal Python
+    environment, fall back to the directory containing this file.
+    """
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        return Path(sys._MEIPASS)
+    return Path(__file__).parent
+
 
 def get_config_dir() -> Path:
     system = platform.system()
@@ -26,7 +40,7 @@ CONFIG_DIR = get_config_dir()
 CONFIG_FILE = CONFIG_DIR / "config.json"
 LOG_FILE = CONFIG_DIR / "session_log.json"
 PROMPT_FILE = CONFIG_DIR / "system_prompt.txt"
-DEFAULT_SYSTEM_PROMPT_PATH = Path(__file__).parent / "prompts" / "default.txt"
+DEFAULT_SYSTEM_PROMPT_PATH = get_bundle_dir() / "prompts" / "default.txt"
 
 DEFAULTS = {
     "provider": "openrouter",

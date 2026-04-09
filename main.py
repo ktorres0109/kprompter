@@ -48,12 +48,24 @@ class KPrompter:
         Quartz/AppKit, which crashes because tkinter already owns NSApplication
         on the main thread.  By running the CGEventTap in a separate *process*,
         the child has its own AppKit context and the parent stays clean.
+
+        In a PyInstaller bundle, sys.executable is the frozen binary (not a
+        Python interpreter) and hotkey_macos.py isn't a standalone script on
+        disk.  We re-invoke the frozen binary with ``--hotkey-subprocess`` so
+        that main.py's ``if __name__`` block routes to the hotkey listener
+        instead of the GUI.
         """
-        script = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                              "hotkey_macos.py")
+        if getattr(sys, "frozen", False):
+            # Frozen app: re-invoke ourselves with a sentinel flag
+            cmd = [sys.executable, "--hotkey-subprocess", hotkey_str]
+        else:
+            # Development: run the script directly
+            script = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                  "hotkey_macos.py")
+            cmd = [sys.executable, script, hotkey_str]
         try:
             self._hotkey_proc = subprocess.Popen(
-                [sys.executable, script, hotkey_str],
+                cmd,
                 stdout=subprocess.PIPE,
                 stderr=None,       # let stderr pass through to console
                 bufsize=1,         # line-buffered
@@ -472,4 +484,14 @@ class KPrompter:
 
 
 if __name__ == "__main__":
-    KPrompter().run()
+    # When the frozen app is re-invoked with --hotkey-subprocess, run only
+    # the hotkey listener (no GUI, no tkinter) and exit when done.  This
+    # gives the child process its own AppKit/Quartz context.
+    if "--hotkey-subprocess" in sys.argv:
+        idx = sys.argv.index("--hotkey-subprocess")
+        _hk = sys.argv[idx + 1] if idx + 1 < len(sys.argv) else "ctrl+alt+g"
+        from hotkey_macos import main as _hotkey_main
+        sys.argv = [sys.argv[0], _hk]  # hotkey_macos reads sys.argv[1]
+        _hotkey_main()
+    else:
+        KPrompter().run()

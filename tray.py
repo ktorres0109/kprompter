@@ -1,8 +1,15 @@
 import platform
+import sys
 import threading
 import os
 
 SYSTEM = platform.system()
+
+
+def _bundle_dir():
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        return sys._MEIPASS
+    return os.path.dirname(__file__)
 
 
 def build_tray(on_settings, on_log, on_quit):
@@ -20,7 +27,7 @@ def build_tray(on_settings, on_log, on_quit):
     except (ImportError, ValueError, OSError):
         return None
 
-    icon_path = os.path.join(os.path.dirname(__file__), "assets", "icon.png")
+    icon_path = os.path.join(_bundle_dir(), "assets", "icon.png")
     if not os.path.exists(icon_path):
         from icon_gen import generate
         generate()

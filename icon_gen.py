@@ -5,10 +5,19 @@ Produces:
   assets/icon.icns  — macOS icon set (16→1024px, used by PyInstaller on macOS)
 """
 import os
+import sys
 import struct
 import zlib
 
-ASSET_DIR = os.path.join(os.path.dirname(__file__), "assets")
+
+def _asset_dir():
+    """Return the assets directory, bundle-aware."""
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        return os.path.join(sys._MEIPASS, "assets")
+    return os.path.join(os.path.dirname(__file__), "assets")
+
+
+ASSET_DIR = _asset_dir()
 os.makedirs(ASSET_DIR, exist_ok=True)
 
 
@@ -91,18 +100,22 @@ def _best_font(size: int):
 
 # ── .icns builder ────────────────────────────────────────────────────────────
 
-ICNS_SIZES = [16, 32, 64, 128, 256, 512, 1024]
-
-# OSType codes for each size and @2x retina variant
-ICNS_TYPES = {
-    16:   (b"icp4", b"icp5"),   # 16, 16@2x (=32)
-    32:   (b"icp5", b"icp6"),
-    64:   (b"icp6", b"ic10"),
-    128:  (b"ic07", b"ic08"),
-    256:  (b"ic08", b"ic09"),
-    512:  (b"ic09", b"ic10"),
-    1024: (b"ic10", None),
-}
+# Canonical .icns OSType → pixel size mapping.
+# Each entry produces one chunk in the .icns file.  We render the master at
+# 1024px and resize down for each entry.
+_ICNS_ENTRIES = [
+    (b"icp4",  16),    # 16×16
+    (b"icp5",  32),    # 32×32
+    (b"icp6",  64),    # 64×64
+    (b"ic07", 128),    # 128×128
+    (b"ic08", 256),    # 256×256
+    (b"ic09", 512),    # 512×512
+    (b"ic10", 1024),   # 1024×1024 (512@2x)
+    (b"ic11",  32),    # 16@2x
+    (b"ic12",  64),    # 32@2x
+    (b"ic13", 256),    # 128@2x
+    (b"ic14", 512),    # 256@2x
+]
 
 
 def _png_bytes(img) -> bytes:
@@ -119,22 +132,9 @@ def build_icns(out_path: str):
     master = _render_pillow(1024)
 
     chunks = []
-    seen = set()
-    for size in ICNS_SIZES:
-        img = master.resize((size, size), Image.LANCZOS)
-        data = _png_bytes(img)
-        ostype1, ostype2 = ICNS_TYPES[size]
-
-        if ostype1 not in seen:
-            chunks.append((ostype1, data))
-            seen.add(ostype1)
-
-        # @2x = next size up already covered, or double
-        retina_size = size * 2
-        if ostype2 and ostype2 not in seen and retina_size <= 1024:
-            img2x = master.resize((retina_size, retina_size), Image.LANCZOS)
-            chunks.append((ostype2, _png_bytes(img2x)))
-            seen.add(ostype2)
+    for ostype, px in _ICNS_ENTRIES:
+        img = master.resize((px, px), Image.LANCZOS)
+        chunks.append((ostype, _png_bytes(img)))
 
     # Assemble icns file
     body = b""
@@ -210,23 +210,30 @@ def generate():
     Generate assets/icon.png (1024×1024) and assets/icon.icns.
     Returns path to icon.png.
     """
-    import platform
     png_path  = os.path.join(ASSET_DIR, "icon.png")
     icns_path = os.path.join(ASSET_DIR, "icon.icns")
 
     try:
-        from PIL import Image
+        from PIL import Image  # noqa: F401
         img = _render_pillow(1024)
         img.save(png_path, "PNG")
-        if platform.system() == "Darwin":
-            build_icns(icns_path)
+        # Always build .icns when Pillow is available (needed for CI builds)
+        build_icns(icns_path)
         return png_path
     except ImportError:
         pass
 
-    # Fallback: pure-Python PNG, no .icns
+    # Fallback: pure-Python PNG
+    png_data = _make_raw_png(1024)
     with open(png_path, "wb") as f:
-        f.write(_make_raw_png(1024))
+        f.write(png_data)
+
+    # Build a minimal .icns wrapping the PNG so the macOS build always has one
+    body = b"ic10" + struct.pack(">I", 8 + len(png_data)) + png_data
+    total = 8 + len(body)
+    with open(icns_path, "wb") as f:
+        f.write(b"icns" + struct.pack(">I", total) + body)
+
     return png_path
 
 
