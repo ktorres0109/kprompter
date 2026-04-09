@@ -277,12 +277,67 @@ class KPrompter:
         menubar.add_cascade(menu=app_menu)
         self._root.config(menu=menubar)
 
+    def _setup_macos_window(self, cfg):
+        """Configure the root window as a visible status window on macOS.
+
+        On macOS there is no tray icon, so the root window must remain
+        visible for the user to interact with the app.
+        """
+        self._root.configure(bg="#0f1117")
+        w, h = 420, 260
+        sw = self._root.winfo_screenwidth()
+        sh = self._root.winfo_screenheight()
+        self._root.geometry(f"{w}x{h}+{(sw - w) // 2}+{(sh - h) // 2}")
+        self._root.resizable(False, False)
+
+        hotkey = cfg.get("hotkey", "ctrl+alt+g")
+        provider = cfg.get("provider", "openrouter")
+        model = cfg.get("model", "")
+
+        tk.Label(
+            self._root, text="K>", font=("Menlo", 36, "bold"),
+            bg="#0f1117", fg="#4a90e2",
+        ).pack(pady=(28, 4))
+
+        tk.Label(
+            self._root, text="KPrompter is running",
+            font=("Menlo", 14), bg="#0f1117", fg="#e4e8f1",
+        ).pack()
+
+        tk.Label(
+            self._root, text=f"Hotkey: {hotkey}",
+            font=("Menlo", 12), bg="#0f1117", fg="#6b7a99",
+        ).pack(pady=(12, 2))
+
+        tk.Label(
+            self._root, text=f"Provider: {provider}" + (f"  •  {model}" if model else ""),
+            font=("Menlo", 11), bg="#0f1117", fg="#6b7a99",
+        ).pack()
+
+        btn_frame = tk.Frame(self._root, bg="#0f1117")
+        btn_frame.pack(pady=(18, 0))
+        tk.Button(
+            btn_frame, text="Settings", command=self.open_settings,
+            bg="#1c2030", fg="#e4e8f1", activebackground="#222738",
+            activeforeground="#e4e8f1", relief="flat", bd=0,
+            padx=16, pady=6, cursor="hand2", font=("Menlo", 11),
+        ).pack(side="left", padx=6)
+        tk.Button(
+            btn_frame, text="Quit", command=self.quit_app,
+            bg="#1c2030", fg="#e4e8f1", activebackground="#222738",
+            activeforeground="#e4e8f1", relief="flat", bd=0,
+            padx=16, pady=6, cursor="hand2", font=("Menlo", 11),
+        ).pack(side="left", padx=6)
+
     def run(self):
         gen_icon()
 
         self._root = tk.Tk()
-        self._root.withdraw()
         self._root.title("KPrompter")
+
+        if SYSTEM != "Darwin":
+            # Linux/Windows: hide root window — users interact via tray icon
+            self._root.withdraw()
 
         if is_first_run():
             wizard = SetupWizard(parent_root=self._root)
@@ -297,13 +352,12 @@ class KPrompter:
         if SYSTEM == "Darwin":
             # macOS: pystray's Icon.run() calls [NSApplication run] which
             # conflicts with tkinter's mainloop (also owns NSApplication).
-            # Running pystray on a background thread crashes (must be main
-            # thread), and running it on the main thread via root.after()
-            # crashes because NSApplication is already running. Skip the
-            # tray icon entirely on macOS — use tkinter's native menu bar
-            # instead so users can still access Settings and Quit.
+            # Skip the tray icon entirely — keep the root window visible
+            # with a status UI and native menu bar instead.
             self._tray = None
             self._setup_macos_menu()
+            self._setup_macos_window(cfg)
+            self._root.deiconify()
         else:
             try:
                 self._tray = build_tray(
