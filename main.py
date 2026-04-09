@@ -297,8 +297,9 @@ class KPrompter:
         print("[KPrompter] Running.")
         if SYSTEM == "Darwin":
             if self._tray:
-                # macOS: run tray in a background thread using run_detached or setup
-                threading.Thread(target=self._run_tray_safe, daemon=True).start()
+                # macOS: pystray requires the main thread (NSApplication run loop).
+                # Schedule it inside tkinter's mainloop so both share the main thread.
+                self._root.after(100, self._tray.run)
             self._root.mainloop()
         else:
             if self._tray:
