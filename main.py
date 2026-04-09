@@ -14,7 +14,6 @@ from config import load_config, is_first_run, PROVIDERS, get_best_model
 from optimizer import optimize
 from clipboard import get_selected_text, paste_text
 from gui import SetupWizard, ResultPopup, SettingsWindow, LoadingPopup
-from tray import build_tray
 from icon_gen import generate as gen_icon
 
 SYSTEM = platform.system()
@@ -94,8 +93,13 @@ class KPrompter:
     # ── Linux/Windows: hotkey via pynput (safe — no AppKit conflict) ───────
 
     def _parse_hotkey(self, hotkey_str: str):
-        """Parse 'ctrl+alt+g' into a frozenset of pynput keys."""
-        from pynput import keyboard as kb
+        """Parse 'ctrl+alt+g' into a frozenset of pynput keys.
+
+        Only called on Linux/Windows — pynput must NEVER be imported on macOS
+        because it initializes Quartz/AppKit which conflicts with tkinter's
+        NSApplication on the main thread.
+        """
+        from pynput import keyboard as kb  # safe: only reachable on non-Darwin
         parts = hotkey_str.lower().split("+")
         keys = set()
         for p in parts:
@@ -113,8 +117,13 @@ class KPrompter:
         return frozenset(keys)
 
     def _start_hotkey_pynput(self, hotkey_str):
+        if SYSTEM == "Darwin":
+            # pynput must NEVER be imported on macOS — it initializes
+            # Quartz/AppKit which conflicts with tkinter's NSApplication.
+            print("[KPrompter] Warning: pynput hotkey listener not available on macOS.")
+            return
         try:
-            from pynput import keyboard as kb
+            from pynput import keyboard as kb  # safe: guarded by Darwin check above
         except ImportError:
             print("[KPrompter] Warning: pynput not available. Hotkey disabled.")
             return
@@ -428,11 +437,17 @@ class KPrompter:
             # conflicts with tkinter's mainloop (also owns NSApplication).
             # Skip the tray icon entirely — keep the root window visible
             # with a status UI and native menu bar instead.
+            # IMPORTANT: Do NOT import tray.py here — even importing pystray
+            # on macOS initializes AppKit and causes SIGTRAP crashes.
             self._tray = None
             self._setup_macos_menu()
             self._setup_macos_window(cfg)
             self._root.deiconify()
         else:
+            # Lazy import: tray.py imports pystray which touches AppKit on
+            # macOS.  By importing only inside this non-Darwin branch we
+            # guarantee pystray is NEVER loaded in the macOS process.
+            from tray import build_tray
             try:
                 self._tray = build_tray(
                     on_settings=self.open_settings,

@@ -6,7 +6,14 @@ SYSTEM = platform.system()
 
 
 def build_tray(on_settings, on_log, on_quit):
-    """Build and return a pystray Icon. Caller must call icon.run() in a thread."""
+    """Build and return a pystray Icon. Caller must call icon.run() in a thread.
+
+    MUST NOT be called on macOS — pystray imports AppKit which conflicts with
+    tkinter's NSApplication on the main thread, causing SIGTRAP crashes.
+    """
+    if SYSTEM == "Darwin":
+        return None
+
     try:
         import pystray
         from PIL import Image as PILImage
