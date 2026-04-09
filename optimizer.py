@@ -31,7 +31,10 @@ def call_openai_compatible(base_url: str, api_key: str, model: str,
 
     data = resp.json()
     try:
-        return data["choices"][0]["message"]["content"].strip()
+        content = data["choices"][0]["message"]["content"]
+        if content is None:
+            raise RuntimeError(f"API returned null content: {str(data)[:200]}")
+        return content.strip()
     except (KeyError, IndexError, TypeError):
         raise RuntimeError(f"Unexpected API response format: {str(data)[:200]}")
 
@@ -63,7 +66,10 @@ def call_anthropic(api_key: str, model: str, system: str, messages: list) -> str
 
     data = resp.json()
     try:
-        return data["content"][0]["text"].strip()
+        text = data["content"][0]["text"]
+        if text is None:
+            raise RuntimeError(f"Anthropic returned null text: {str(data)[:200]}")
+        return text.strip()
     except (KeyError, IndexError, TypeError):
         raise RuntimeError(f"Unexpected Anthropic response format: {str(data)[:200]}")
 
