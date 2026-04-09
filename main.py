@@ -44,25 +44,23 @@ class KPrompter:
     def _start_hotkey_macos(self, hotkey_str):
         """Launch hotkey_macos.py as a child process with its own Quartz loop.
 
-        On macOS, pynput's Listener starts a background thread that initializes
-        Quartz/AppKit, which crashes because tkinter already owns NSApplication
-        on the main thread.  By running the CGEventTap in a separate *process*,
-        the child has its own AppKit context and the parent stays clean.
-
-        In a PyInstaller bundle, sys.executable is the frozen binary (not a
-        Python interpreter) and hotkey_macos.py isn't a standalone script on
-        disk.  We re-invoke the frozen binary with ``--hotkey-subprocess`` so
-        that main.py's ``if __name__`` block routes to the hotkey listener
-        instead of the GUI.
+        In a frozen PyInstaller .app, re-invoking the binary triggers
+        NSApplication conflicts (macOS forbids two GUI loops).  Frozen
+        builds skip the subprocess and rely on the in-window Optimize button.
         """
         if getattr(sys, "frozen", False):
-            # Frozen app: re-invoke ourselves with a sentinel flag
-            cmd = [sys.executable, "--hotkey-subprocess", hotkey_str]
-        else:
-            # Development: run the script directly
-            script = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                  "hotkey_macos.py")
-            cmd = [sys.executable, script, hotkey_str]
+            # Frozen PyInstaller app: skip the Quartz hotkey subprocess.
+            # Re-invoking the same .app binary starts a second NSApplication
+            # which conflicts with tkinter's mainloop → SIGTRAP crash.
+            # The window has an Optimize button as a reliable fallback.
+            print("[KPrompter] Packaged app: global hotkey disabled. "
+                  "Use the Optimize button in the status window.")
+            return
+
+        # Development mode: run hotkey_macos.py as a separate process
+        script = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                              "hotkey_macos.py")
+        cmd = [sys.executable, script, hotkey_str]
         try:
             self._hotkey_proc = subprocess.Popen(
                 cmd,
@@ -371,6 +369,11 @@ class KPrompter:
         menubar.add_cascade(menu=app_menu)
         self._root.config(menu=menubar)
 
+    def _trigger_optimize(self):
+        """Trigger the optimize flow from the macOS window button."""
+        if not self._busy:
+            threading.Thread(target=self._run_flow, daemon=True).start()
+
     def _setup_macos_window(self, cfg):
         """Configure the root window as a visible status window on macOS.
 
@@ -378,7 +381,7 @@ class KPrompter:
         visible for the user to interact with the app.
         """
         self._root.configure(bg="#0f1117")
-        w, h = 420, 260
+        w, h = 420, 380
         sw = self._root.winfo_screenwidth()
         sh = self._root.winfo_screenheight()
         self._root.geometry(f"{w}x{h}+{(sw - w) // 2}+{(sh - h) // 2}")
@@ -423,6 +426,23 @@ class KPrompter:
             padx=16, pady=6, cursor="hand2", font=("Menlo", 11),
         ).pack(side="left", padx=6)
 
+        # ── Optimize trigger button ──────────────────────────────────────
+        tk.Frame(self._root, bg="#0f1117", height=18).pack()
+        trigger_btn = tk.Button(
+            self._root, text="Optimize Selected Text",
+            command=self._trigger_optimize,
+            bg="#4a90e2", fg="#ffffff",
+            activebackground="#3a7bd5", activeforeground="#ffffff",
+            relief="flat", bd=0, padx=24, pady=10, cursor="hand2",
+            font=("Menlo", 13, "bold"),
+        )
+        trigger_btn.pack()
+        tk.Label(
+            self._root,
+            text="Select text in any app, then click above",
+            font=("Menlo", 10), bg="#0f1117", fg="#6b7a99",
+        ).pack(pady=(6, 0))
+
     def run(self):
         gen_icon()
 
@@ -455,6 +475,11 @@ class KPrompter:
             self._setup_macos_menu()
             self._setup_macos_window(cfg)
             self._root.deiconify()
+            # macOS: close button (red X) hides window to dock.
+            # Clicking the dock icon reopens it.  Quit via menu or button.
+            self._root.protocol("WM_DELETE_WINDOW", self._root.withdraw)
+            self._root.createcommand("tk::mac::ReopenApplication",
+                                     self._root.deiconify)
         else:
             # Lazy import: tray.py imports pystray which touches AppKit on
             # macOS.  By importing only inside this non-Darwin branch we

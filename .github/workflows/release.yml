@@ -60,7 +60,9 @@ jobs:
           --add-data "prompts/default.txt:prompts"
           --add-data "assets/icon.png:assets"
           --add-data "assets/icon.icns:assets"
-          --hidden-import hotkey_macos
+          --exclude-module pynput
+          --exclude-module pystray
+          --exclude-module pyautogui
           --osx-bundle-identifier "com.ktorres.kprompter"
           main.py
 
