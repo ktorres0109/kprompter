@@ -116,26 +116,29 @@ PROVIDERS = {
 
 
 _openrouter_fetched = False
+_openrouter_lock = threading.Lock()
 
 def _fetch_openrouter_models_sync():
     global _openrouter_fetched
     if not requests or _openrouter_fetched:
         return
-    try:
-        response = requests.get("https://openrouter.ai/api/v1/models", timeout=3)
-        data = response.json().get('data', [])
-        free_models = [m['id'] for m in data if m.get('pricing', {}).get('prompt', "-1") == "0"]
-        if free_models:
-            current_ids = {m["id"] for m in PROVIDERS["openrouter"]["models"]}
-            # Reverse order to keep most popular models at the top when inserting at index 0
-            for mid in reversed(free_models):
-                if mid not in current_ids:
-                    name_parts = mid.split("/")[-1].replace("-", " ").title()
-                    label = f"{name_parts} (free live)"
-                    PROVIDERS["openrouter"]["models"].insert(0, {"label": label, "id": mid, "free": True})
-        _openrouter_fetched = True
-    except Exception:
-        pass
+    with _openrouter_lock:
+        if _openrouter_fetched:
+            return
+        try:
+            response = requests.get("https://openrouter.ai/api/v1/models", timeout=5)
+            data = response.json().get('data', [])
+            free_models = [m['id'] for m in data if m.get('pricing', {}).get('prompt', "-1") == "0"]
+            if free_models:
+                current_ids = {m["id"] for m in PROVIDERS["openrouter"]["models"]}
+                for mid in reversed(free_models):
+                    if mid not in current_ids:
+                        name_parts = mid.split("/")[-1].replace("-", " ").title()
+                        label = f"{name_parts} (free live)"
+                        PROVIDERS["openrouter"]["models"].insert(0, {"label": label, "id": mid, "free": True})
+            _openrouter_fetched = True
+        except Exception:
+            _openrouter_fetched = True  # Don't retry on failure
 
 
 def get_best_model(provider: str) -> str:

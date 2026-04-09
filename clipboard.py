@@ -7,63 +7,114 @@ SYSTEM = platform.system()
 
 def get_selected_text() -> tuple:
     """Grab currently selected text. Returns (text, original_clipboard)."""
-    original = _get_clipboard()
-    _set_clipboard("")
+    try:
+        original = _get_clipboard()
+    except Exception:
+        original = ""
+    try:
+        _set_clipboard("")
+    except Exception:
+        pass
     _send_copy()
 
     # Poll clipboard to catch text immediately when it arrives (max 1.5s)
     text = ""
     for _ in range(30):
         time.sleep(0.05)
-        text = _get_clipboard()
+        try:
+            text = _get_clipboard()
+        except Exception:
+            text = ""
         if text:
             break
 
-    return text, original
+    return text or "", original or ""
 
 
 def paste_text(text: str, original_clipboard: str = None):
     """Paste text in place, then restore original clipboard."""
-    _set_clipboard(text)
+    try:
+        _set_clipboard(text)
+    except Exception:
+        return
     time.sleep(0.15)
     _send_paste()
     time.sleep(0.3)   # wait for paste to land before restoring clipboard
     if original_clipboard is not None:
-        _set_clipboard(original_clipboard)
+        try:
+            _set_clipboard(original_clipboard)
+        except Exception:
+            pass
 
 
 def _send_copy():
     if SYSTEM == "Darwin":
         _applescript('tell application "System Events" to keystroke "c" using command down')
     else:
-        import pyautogui
-        pyautogui.hotkey("ctrl", "c")
+        try:
+            import pyautogui
+            pyautogui.hotkey("ctrl", "c")
+        except Exception:
+            pass
 
 
 def _send_paste():
     if SYSTEM == "Darwin":
         _applescript('tell application "System Events" to keystroke "v" using command down')
     else:
-        import pyautogui
-        pyautogui.hotkey("ctrl", "v")
+        try:
+            import pyautogui
+            pyautogui.hotkey("ctrl", "v")
+        except Exception:
+            pass
 
 
 def _get_clipboard() -> str:
     if SYSTEM == "Darwin":
-        result = subprocess.run(["pbpaste"], capture_output=True, text=True)
-        return result.stdout
+        try:
+            result = subprocess.run(["pbpaste"], capture_output=True, text=True, timeout=3)
+            return result.stdout
+        except Exception:
+            return ""
     else:
-        import pyperclip
-        return pyperclip.paste()
+        try:
+            import pyperclip
+            return pyperclip.paste()
+        except Exception:
+            # Fallback: try xclip directly
+            try:
+                result = subprocess.run(
+                    ["xclip", "-selection", "clipboard", "-o"],
+                    capture_output=True, text=True, timeout=3
+                )
+                return result.stdout
+            except Exception:
+                return ""
 
 
 def _set_clipboard(text: str):
     if SYSTEM == "Darwin":
-        subprocess.run(["pbcopy"], input=text.encode(), check=True)
+        try:
+            subprocess.run(["pbcopy"], input=text.encode(), check=True, timeout=3)
+        except Exception:
+            pass
     else:
-        import pyperclip
-        pyperclip.copy(text)
+        try:
+            import pyperclip
+            pyperclip.copy(text)
+        except Exception:
+            # Fallback: try xclip directly
+            try:
+                subprocess.run(
+                    ["xclip", "-selection", "clipboard"],
+                    input=text.encode(), check=True, timeout=3
+                )
+            except Exception:
+                pass
 
 
 def _applescript(script: str):
-    subprocess.run(["osascript", "-e", script], check=True)
+    try:
+        subprocess.run(["osascript", "-e", script], check=True, timeout=5)
+    except Exception:
+        pass

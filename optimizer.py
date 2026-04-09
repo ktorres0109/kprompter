@@ -19,7 +19,9 @@ def call_openai_compatible(base_url: str, api_key: str, model: str,
         resp.raise_for_status()
     except requests.exceptions.ConnectionError:
         raise RuntimeError(f"Could not connect to {base_url}. Check your internet or that Ollama is running.")
-    except requests.exceptions.HTTPError as e:
+    except requests.exceptions.Timeout:
+        raise RuntimeError(f"Request to {base_url} timed out. Check your internet connection.")
+    except requests.exceptions.HTTPError:
         body = ""
         try:
             body = resp.json().get("error", {}).get("message", resp.text[:200])
@@ -28,7 +30,10 @@ def call_openai_compatible(base_url: str, api_key: str, model: str,
         raise RuntimeError(f"API error ({resp.status_code}): {body}")
 
     data = resp.json()
-    return data["choices"][0]["message"]["content"].strip()
+    try:
+        return data["choices"][0]["message"]["content"].strip()
+    except (KeyError, IndexError, TypeError):
+        raise RuntimeError(f"Unexpected API response format: {str(data)[:200]}")
 
 
 def call_anthropic(api_key: str, model: str, system: str, messages: list) -> str:
@@ -44,7 +49,11 @@ def call_anthropic(api_key: str, model: str, system: str, messages: list) -> str
         resp = requests.post("https://api.anthropic.com/v1/messages",
                              headers=headers, json=payload, timeout=30)
         resp.raise_for_status()
-    except requests.exceptions.HTTPError as e:
+    except requests.exceptions.ConnectionError:
+        raise RuntimeError("Could not connect to Anthropic API. Check your internet connection.")
+    except requests.exceptions.Timeout:
+        raise RuntimeError("Request to Anthropic API timed out. Check your internet connection.")
+    except requests.exceptions.HTTPError:
         body = ""
         try:
             body = resp.json().get("error", {}).get("message", resp.text[:200])
@@ -52,7 +61,11 @@ def call_anthropic(api_key: str, model: str, system: str, messages: list) -> str
             body = resp.text[:200]
         raise RuntimeError(f"Anthropic API error ({resp.status_code}): {body}")
 
-    return resp.json()["content"][0]["text"].strip()
+    data = resp.json()
+    try:
+        return data["content"][0]["text"].strip()
+    except (KeyError, IndexError, TypeError):
+        raise RuntimeError(f"Unexpected Anthropic response format: {str(data)[:200]}")
 
 
 def optimize(raw_text: str, is_first_message: bool = True,
@@ -66,7 +79,18 @@ def optimize(raw_text: str, is_first_message: bool = True,
     if not model:
         model = pinfo.get("best_free", "")
 
+    if not api_key and provider not in ("ollama",):
+        raise RuntimeError(
+            f"No API key configured for {pinfo.get('name', provider)}. "
+            "Open Settings to add one."
+        )
+
     system_prompt = get_system_prompt()
+    if not system_prompt:
+        raise RuntimeError(
+            "No system prompt found. Open Settings → System Prompt to configure one."
+        )
+
     mode_note = (
         "FIRST MESSAGE MODE: This is the start of a new project or conversation. "
         "Add full role, context, and setup structure."
@@ -85,7 +109,6 @@ def optimize(raw_text: str, is_first_message: bool = True,
         result = call_anthropic(api_key, model, full_system,
                                 [m for m in messages if m["role"] != "system"])
     elif provider == "ollama":
-        # Ollama OpenAI-compat accepts any non-empty string as key
         result = call_openai_compatible(pinfo["base_url"], "ollama", model, messages)
     elif provider == "openrouter":
         result = call_openai_compatible(
@@ -96,15 +119,17 @@ def optimize(raw_text: str, is_first_message: bool = True,
             }
         )
     else:
-        # OpenAI, Gemini (OpenAI-compat endpoint)
         result = call_openai_compatible(pinfo["base_url"], api_key, model, messages)
 
-    log_entry({
-        "provider": provider,
-        "model": model,
-        "mode": "first" if is_first_message else "continuation",
-        "input_chars": len(raw_text),
-        "output_chars": len(result),
-    })
+    try:
+        log_entry({
+            "provider": provider,
+            "model": model,
+            "mode": "first" if is_first_message else "continuation",
+            "input_chars": len(raw_text),
+            "output_chars": len(result),
+        })
+    except Exception:
+        pass  # Don't crash the app if logging fails
 
     return result

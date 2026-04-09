@@ -1,7 +1,6 @@
 import platform
 import threading
 import os
-import subprocess
 
 SYSTEM = platform.system()
 
@@ -11,7 +10,7 @@ def build_tray(on_settings, on_log, on_quit):
     try:
         import pystray
         from PIL import Image as PILImage
-    except ImportError:
+    except (ImportError, ValueError, OSError):
         return None
 
     icon_path = os.path.join(os.path.dirname(__file__), "assets", "icon.png")
@@ -19,7 +18,10 @@ def build_tray(on_settings, on_log, on_quit):
         from icon_gen import generate
         generate()
 
-    img = PILImage.open(icon_path)
+    try:
+        img = PILImage.open(icon_path)
+    except Exception:
+        return None
 
     menu = pystray.Menu(
         pystray.MenuItem("KPrompter", None, enabled=False),
@@ -30,7 +32,10 @@ def build_tray(on_settings, on_log, on_quit):
         pystray.MenuItem("Quit", lambda: _call(on_quit)),
     )
 
-    icon = pystray.Icon("KPrompter", img, "KPrompter", menu)
+    try:
+        icon = pystray.Icon("KPrompter", img, "KPrompter", menu)
+    except Exception:
+        return None
     return icon
 
 

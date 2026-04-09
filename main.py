@@ -48,7 +48,12 @@ class KPrompter:
         return frozenset(keys)
 
     def _start_hotkey_listener(self):
-        from pynput import keyboard as kb
+        try:
+            from pynput import keyboard as kb
+        except ImportError:
+            print("[KPrompter] Warning: pynput not available. Hotkey disabled.")
+            return
+
         cfg = load_config()
         hotkey_str = cfg.get("hotkey", "ctrl+alt+g")
         target = self._parse_hotkey(hotkey_str)
@@ -56,7 +61,6 @@ class KPrompter:
 
         def _normalize(key):
             """Collapse left/right variants and normalize char case."""
-            # Collapse modifier variants (alt_l→alt, ctrl_l→ctrl, etc.)
             _map = {
                 kb.Key.alt_l: kb.Key.alt, kb.Key.alt_r: kb.Key.alt,
                 kb.Key.ctrl_l: kb.Key.ctrl, kb.Key.ctrl_r: kb.Key.ctrl,
@@ -77,10 +81,13 @@ class KPrompter:
         def on_release(key):
             pressed.discard(_normalize(key))
 
-        self._listener = kb.Listener(on_press=on_press, on_release=on_release)
-        self._listener.daemon = True
-        self._listener.start()
-        print(f"[KPrompter] Listening for hotkey: {hotkey_str}")
+        try:
+            self._listener = kb.Listener(on_press=on_press, on_release=on_release)
+            self._listener.daemon = True
+            self._listener.start()
+            print(f"[KPrompter] Listening for hotkey: {hotkey_str}")
+        except Exception as e:
+            print(f"[KPrompter] Warning: Could not start hotkey listener: {e}")
 
     # ── Main flow ─────────────────────────────────────────────────────────────
 
@@ -89,7 +96,7 @@ class KPrompter:
         try:
             time.sleep(0.08)  # small delay so key release doesn't interfere
             text, original_cb = get_selected_text()
-            if not text.strip():
+            if not text or not text.strip():
                 self._busy = False
                 return
 
@@ -110,6 +117,10 @@ class KPrompter:
 
             self._stop_spinner()
 
+            if not result or not result.strip():
+                self._show_error("AI returned an empty response. Please try again.")
+                return
+
             # Detect if model is asking clarifying questions
             q_count = result.count("?")
             last_line = result.strip().splitlines()[-1].strip() if result.strip() else ""
@@ -121,59 +132,64 @@ class KPrompter:
                 paste_text(result, original_cb)
                 self._conversation.append({"role": "user", "content": text})
                 self._conversation.append({"role": "assistant", "content": result})
-                # Efficiency: Cap history to last 6 messages (3 turns) to save tokens.
-                # In "continuation" mode, LLMs rarely need more than the last few interactions
-                # to understand the immediate context, drastically cutting API costs.
                 if len(self._conversation) > 6:
                     self._conversation = self._conversation[-6:]
+        except Exception as e:
+            self._stop_spinner()
+            self._show_error(f"Unexpected error: {e}")
         finally:
             self._busy = False
 
     def _ask_first_message_mode(self) -> bool:
+        if not self._root:
+            return True
         result = {"value": True}
         done = threading.Event()
 
         def ask():
-            win = tk.Toplevel(self._root)
-            win.title("KPrompter")
-            win.configure(bg="#0d0f13")
-            win.attributes("-topmost", True)
-            win.resizable(False, False)
-            sw, sh = win.winfo_screenwidth(), win.winfo_screenheight()
-            win.geometry(f"400x155+{(sw-400)//2}+{(sh-155)//2}")
+            try:
+                win = tk.Toplevel(self._root)
+                win.title("KPrompter")
+                win.configure(bg="#0d0f13")
+                win.attributes("-topmost", True)
+                win.resizable(False, False)
+                sw, sh = win.winfo_screenwidth(), win.winfo_screenheight()
+                win.geometry(f"400x155+{(sw-400)//2}+{(sh-155)//2}")
 
-            tk.Label(
-                win, text="Is this the first message in a new project?",
-                bg="#0d0f13", fg="#e8eaf0",
-                font=("Menlo", 12) if SYSTEM == "Darwin" else ("Consolas", 11),
-                wraplength=360,
-            ).pack(pady=(24, 14))
+                tk.Label(
+                    win, text="Is this the first message in a new project?",
+                    bg="#0d0f13", fg="#e8eaf0",
+                    font=("Menlo", 12) if SYSTEM == "Darwin" else ("Consolas", 11),
+                    wraplength=360,
+                ).pack(pady=(24, 14))
 
-            row = tk.Frame(win, bg="#0d0f13")
-            row.pack()
+                row = tk.Frame(win, bg="#0d0f13")
+                row.pack()
 
-            def yes():
-                result["value"] = True
-                win.destroy()
+                def yes():
+                    result["value"] = True
+                    win.destroy()
+                    done.set()
+
+                def no():
+                    result["value"] = False
+                    win.destroy()
+                    done.set()
+
+                for label, cmd, bg, fg in [
+                    ("Yes — new project", yes, "#4af0a0", "#0d0f13"),
+                    ("No — continuing",   no,  "#1a1e27", "#e8eaf0"),
+                ]:
+                    b = tk.Button(row, text=label, command=cmd, bg=bg, fg=fg,
+                                  activebackground=bg, activeforeground=fg,
+                                  relief="flat", bd=0, padx=14, pady=8,
+                                  cursor="hand2",
+                                  font=("Menlo", 11) if SYSTEM == "Darwin" else ("Consolas", 10))
+                    b.pack(side="left", padx=8)
+
+                win.protocol("WM_DELETE_WINDOW", yes)
+            except Exception:
                 done.set()
-
-            def no():
-                result["value"] = False
-                win.destroy()
-                done.set()
-
-            for label, cmd, bg, fg in [
-                ("Yes — new project", yes, "#4af0a0", "#0d0f13"),
-                ("No — continuing",   no,  "#1a1e27", "#e8eaf0"),
-            ]:
-                b = tk.Button(row, text=label, command=cmd, bg=bg, fg=fg,
-                              activebackground=bg, activeforeground=fg,
-                              relief="flat", bd=0, padx=14, pady=8,
-                              cursor="hand2",
-                              font=("Menlo", 11) if SYSTEM == "Darwin" else ("Consolas", 10))
-                b.pack(side="left", padx=8)
-
-            win.protocol("WM_DELETE_WINDOW", yes)
 
         self._root.after(0, ask)
         done.wait(timeout=30)
@@ -188,10 +204,11 @@ class KPrompter:
                 daemon=True,
             ).start()
 
-        self._root.after(0, lambda: ResultPopup(
-            questions, is_question=True,
-            on_answer=on_answer, original_text=original_text,
-        ))
+        if self._root:
+            self._root.after(0, lambda: ResultPopup(
+                self._root, questions, is_question=True,
+                on_answer=on_answer, original_text=original_text,
+            ))
 
     def _run_with_text(self, text, original_cb, is_first):
         self._busy = True
@@ -211,11 +228,17 @@ class KPrompter:
             self._busy = False
 
     def _start_spinner(self):
-        self._spinner = LoadingPopup()
+        try:
+            self._spinner = LoadingPopup(self._root)
+        except Exception:
+            self._spinner = None
 
     def _stop_spinner(self):
         if self._root and self._spinner:
-            self._root.after(0, self._spinner.close)
+            try:
+                self._root.after(0, self._spinner.close)
+            except Exception:
+                pass
             self._spinner = None
 
     def _show_error(self, msg):
@@ -225,15 +248,24 @@ class KPrompter:
 
     def open_settings(self):
         if self._root:
-            self._root.after(0, SettingsWindow)
+            self._root.after(0, lambda: SettingsWindow(self._root))
 
     def quit_app(self):
         if self._listener:
-            self._listener.stop()
+            try:
+                self._listener.stop()
+            except Exception:
+                pass
         if self._tray:
-            self._tray.stop()
+            try:
+                self._tray.stop()
+            except Exception:
+                pass
         if self._root:
-            self._root.after(0, self._root.quit)
+            try:
+                self._root.after(0, self._root.quit)
+            except Exception:
+                pass
 
     def run(self):
         gen_icon()
@@ -252,22 +284,33 @@ class KPrompter:
 
         self._start_hotkey_listener()
 
-        self._tray = build_tray(
-            on_settings=self.open_settings,
-            on_log=self.open_settings,
-            on_quit=self.quit_app,
-        )
+        try:
+            self._tray = build_tray(
+                on_settings=self.open_settings,
+                on_log=self.open_settings,
+                on_quit=self.quit_app,
+            )
+        except Exception as e:
+            print(f"[KPrompter] Warning: Could not create tray icon: {e}")
+            self._tray = None
 
         print("[KPrompter] Running.")
         if SYSTEM == "Darwin":
             if self._tray:
-                # macOS: Launch native app loop inside Tkinter's main loop to keep both on the main thread
-                self._root.after(100, self._tray.run)
+                # macOS: run tray in a background thread using run_detached or setup
+                threading.Thread(target=self._run_tray_safe, daemon=True).start()
             self._root.mainloop()
         else:
             if self._tray:
-                threading.Thread(target=self._tray.run, daemon=True).start()
+                threading.Thread(target=self._run_tray_safe, daemon=True).start()
             self._root.mainloop()
+
+    def _run_tray_safe(self):
+        try:
+            if self._tray:
+                self._tray.run()
+        except Exception as e:
+            print(f"[KPrompter] Tray error: {e}")
 
 
 if __name__ == "__main__":
