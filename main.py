@@ -267,6 +267,16 @@ class KPrompter:
             except Exception:
                 pass
 
+    def _setup_macos_menu(self):
+        """Create a tkinter menu bar on macOS to replace the pystray tray icon."""
+        menubar = tk.Menu(self._root)
+        app_menu = tk.Menu(menubar, name="apple", tearoff=0)
+        app_menu.add_command(label="Settings…", command=self.open_settings)
+        app_menu.add_separator()
+        app_menu.add_command(label="Quit KPrompter", command=self.quit_app)
+        menubar.add_cascade(menu=app_menu)
+        self._root.config(menu=menubar)
+
     def run(self):
         gen_icon()
 
@@ -284,27 +294,31 @@ class KPrompter:
 
         self._start_hotkey_listener()
 
-        try:
-            self._tray = build_tray(
-                on_settings=self.open_settings,
-                on_log=self.open_settings,
-                on_quit=self.quit_app,
-            )
-        except Exception as e:
-            print(f"[KPrompter] Warning: Could not create tray icon: {e}")
+        if SYSTEM == "Darwin":
+            # macOS: pystray's Icon.run() calls [NSApplication run] which
+            # conflicts with tkinter's mainloop (also owns NSApplication).
+            # Running pystray on a background thread crashes (must be main
+            # thread), and running it on the main thread via root.after()
+            # crashes because NSApplication is already running. Skip the
+            # tray icon entirely on macOS — use tkinter's native menu bar
+            # instead so users can still access Settings and Quit.
             self._tray = None
+            self._setup_macos_menu()
+        else:
+            try:
+                self._tray = build_tray(
+                    on_settings=self.open_settings,
+                    on_log=self.open_settings,
+                    on_quit=self.quit_app,
+                )
+            except Exception as e:
+                print(f"[KPrompter] Warning: Could not create tray icon: {e}")
+                self._tray = None
 
         print("[KPrompter] Running.")
-        if SYSTEM == "Darwin":
-            if self._tray:
-                # macOS: pystray requires the main thread (NSApplication run loop).
-                # Schedule it inside tkinter's mainloop so both share the main thread.
-                self._root.after(100, self._tray.run)
-            self._root.mainloop()
-        else:
-            if self._tray:
-                threading.Thread(target=self._run_tray_safe, daemon=True).start()
-            self._root.mainloop()
+        if self._tray:
+            threading.Thread(target=self._run_tray_safe, daemon=True).start()
+        self._root.mainloop()
 
     def _run_tray_safe(self):
         try:
