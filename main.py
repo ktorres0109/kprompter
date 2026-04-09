@@ -260,25 +260,17 @@ class KPrompter:
 
         print("[KPrompter] Running.")
         if SYSTEM == "Darwin" and self._tray:
-            # On macOS, pystray (NSApplication) MUST run on the main thread.
-            # Tkinter also wants the main thread. To run both, we start pystray's loop
-            # and periodically pump Tkinter events using PyObjC's AppHelper.callLater
+            # Under PyInstaller --windowed, the Python script runs on a background thread.
+            # To call the native macOS app loop, we MUST dispatch it to the true Main Thread (Thread 0)
+            # using Grand Central Dispatch or PyObjC's callAfter, while the Python thread pumps Tkinter.
             try:
                 from PyObjCTools import AppHelper
-                def pump_tk():
-                    try:
-                        self._root.update()
-                    except Exception:
-                        return
-                    # Schedule the next pump on the main thread with a 50ms delay
-                    # to keep CPU usage near zero.
-                    AppHelper.callLater(0.05, pump_tk)
-
-                # Schedule the first pump
-                AppHelper.callLater(0.05, pump_tk)
-                self._tray.run()
+                # Dispatch the native pystray UI loop to the actual Main Thread
+                AppHelper.callAfter(self._tray.run)
+                # The background Python thread will handle Tkinter's mainloop
+                self._root.mainloop()
             except ImportError:
-                print("[KPrompter] PyObjC not found. Falling back to Tkinter loop.")
+                print("[KPrompter] PyObjC not found. Running without tray on macOS.")
                 self._root.mainloop()
         else:
             if self._tray:
