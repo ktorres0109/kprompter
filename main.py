@@ -2,103 +2,119 @@
 KPrompter — main entry point
 Hotkey → grab selection → optimize → paste back
 """
+import sys
 import threading
 import platform
 import tkinter as tk
 import time
 import os
 import subprocess
-import sys
+import webbrowser
 
 from config import load_config, is_first_run, PROVIDERS, get_best_model
 from optimizer import optimize
-from clipboard import get_selected_text, paste_text
-from gui import SetupWizard, ResultPopup, SettingsWindow, LoadingPopup
+from clipboard import get_selected_text, paste_text, get_frontmost_app, activate_app, grab_selected_text_now
+from gui import SetupWizard, SettingsWindow, LoadingPopup
 from icon_gen import generate as gen_icon
 
 SYSTEM = platform.system()
+_DEBUG = os.environ.get("KP_DEBUG") == "1"
+
+
+def _dbg(msg: str):
+    if _DEBUG:
+        with open("/tmp/kp_debug.log", "a") as _f:
+            _f.write(msg + "\n")
+
+
+def _ax_trusted() -> bool:
+    """Return True if this process has macOS Accessibility permission."""
+    if SYSTEM != "Darwin":
+        return True
+    try:
+        import ctypes
+        ax = ctypes.cdll.LoadLibrary(
+            "/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices"
+        )
+        ax.AXIsProcessTrusted.restype = ctypes.c_bool
+        return bool(ax.AXIsProcessTrusted())
+    except Exception:
+        return True  # can't check — assume OK
 
 
 class KPrompter:
     def __init__(self):
         self._busy = False
         self._conversation: list = []
+        self._project_windows: list = []
         self._tray = None
         self._root = None
         self._spinner = None
-        self._listener = None       # pynput listener (Linux/Windows)
-        self._hotkey_proc = None    # hotkey subprocess (macOS)
+        self._listener = None           # pynput listener (Linux/Windows)
+        self._hotkey_monitor = None     # HotkeyMonitor (macOS NSEvent)
+        self._settings_win = None
+        self._accessibility_prompted = False
 
     # ── Hotkey listener ───────────────────────────────────────────────────────
 
     def _start_hotkey_listener(self):
         cfg = load_config()
-        hotkey_str = cfg.get("hotkey", "ctrl+alt+g")
+        hotkey_str = cfg.get("hotkey", "cmd+option+k" if SYSTEM == "Darwin" else "ctrl+alt+k")
         if SYSTEM == "Darwin":
             self._start_hotkey_macos(hotkey_str)
         else:
             self._start_hotkey_pynput(hotkey_str)
 
-    # ── macOS: hotkey via subprocess (avoids AppKit on background thread) ──
+    # ── macOS: hotkey via NSEvent global monitor (main-thread, no subprocess) ──
 
     def _start_hotkey_macos(self, hotkey_str):
-        """Launch hotkey_macos.py as a child process with its own Quartz loop.
+        """Install an NSEvent global key-down monitor for the hotkey.
 
-        In a frozen PyInstaller .app, re-invoking the binary triggers
-        NSApplication conflicts (macOS forbids two GUI loops).  Frozen
-        builds skip the subprocess and rely on the in-window Optimize button.
+        NSEvent.addGlobalMonitorForEventsMatchingMask_handler_ runs on the
+        main thread's run loop (which tkinter's mainloop drives), so there is
+        no subprocess, no second NSApplication, and no Gatekeeper issue.
+        Requires Accessibility permission — if not granted the monitor returns
+        None and we schedule a retry every 10 s until permission is given.
         """
-        if getattr(sys, "frozen", False):
-            # Frozen PyInstaller app: skip the Quartz hotkey subprocess.
-            # Re-invoking the same .app binary starts a second NSApplication
-            # which conflicts with tkinter's mainloop → SIGTRAP crash.
-            # The window has an Optimize button as a reliable fallback.
-            print("[KPrompter] Packaged app: global hotkey disabled. "
-                  "Use the Optimize button in the status window.")
-            return
+        # Tear down any previous monitor first
+        if self._hotkey_monitor is not None:
+            self._hotkey_monitor.stop()
+            self._hotkey_monitor = None
 
-        # Development mode: run hotkey_macos.py as a separate process
-        script = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                              "hotkey_macos.py")
-        cmd = [sys.executable, script, hotkey_str]
-        try:
-            self._hotkey_proc = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=None,       # let stderr pass through to console
-                bufsize=1,         # line-buffered
-                text=True,
-            )
-        except Exception as e:
-            print(f"[KPrompter] Warning: Could not start macOS hotkey subprocess: {e}")
-            return
+        from hotkey_macos import HotkeyMonitor
 
-        # Make stdout non-blocking so tkinter polling never stalls
-        import fcntl
-        fd = self._hotkey_proc.stdout.fileno()
-        flags = fcntl.fcntl(fd, fcntl.F_GETFL)
-        fcntl.fcntl(fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
+        def _on_hotkey():
+            if not self._busy:
+                # Only capture app name on tap thread — text grab needs its own thread
+                # so HID events aren't posted from within the tap callback context.
+                app_at_keypress = get_frontmost_app()
+                _dbg(f"[_on_hotkey] app={app_at_keypress!r}")
+                threading.Thread(
+                    target=self._run_flow,
+                    args=(app_at_keypress, ""),
+                    daemon=True
+                ).start()
 
-        print(f"[KPrompter] Listening for hotkey (macOS subprocess): {hotkey_str}")
-        self._poll_hotkey_subprocess()
+        monitor = HotkeyMonitor(hotkey_str, callback=_on_hotkey)
 
-    def _poll_hotkey_subprocess(self):
-        """Non-blocking poll of the hotkey subprocess, driven by tkinter after()."""
-        if not hasattr(self, "_hotkey_proc") or self._hotkey_proc is None:
-            return
-        if self._hotkey_proc.poll() is not None:
-            print("[KPrompter] macOS hotkey subprocess exited.")
-            return
-        try:
-            line = self._hotkey_proc.stdout.readline()
-            if line and line.strip() == "HOTKEY":
-                if not self._busy:
-                    threading.Thread(target=self._run_flow, daemon=True).start()
-        except (IOError, OSError):
-            pass  # non-blocking read, no data available
-        # Re-schedule poll (every 100ms — responsive without burning CPU)
+        # Must install on the main thread — use after() to be safe
+        def _install():
+            monitor.start()
+            _dbg(f"[KPrompter] tap active={monitor.is_active} hotkey={hotkey_str}")
+            if not monitor.is_active:
+                # CGEventTap failed — Accessibility not granted yet.
+                # Poll silently every 5 s until granted; open Settings once.
+                self._check_accessibility()
+                self._root.after(5_000, lambda: self._start_hotkey_macos(hotkey_str))
+            else:
+                self._hotkey_monitor = monitor
+                self._accessibility_prompted = True  # mark as done
+
         if self._root:
-            self._root.after(100, self._poll_hotkey_subprocess)
+            self._root.after(0, _install)
+        else:
+            # root not ready yet — will be called again once root exists
+            pass
 
     # ── Linux/Windows: hotkey via pynput (safe — no AppKit conflict) ───────
 
@@ -173,19 +189,54 @@ class KPrompter:
 
     # ── Main flow ─────────────────────────────────────────────────────────────
 
-    def _run_flow(self):
+    def _run_flow(self, source_app: str = "", pre_captured_text: str = ""):
+        """Called by the hotkey: grab selection → optimize → paste back. Silent — no UI."""
         self._busy = True
         try:
-            time.sleep(0.08)  # small delay so key release doesn't interfere
-            text, original_cb = get_selected_text()
-            if not text or not text.strip():
+            _dbg(f"[_run_flow] source_app={source_app!r}")
+
+            # ── Accessibility gate ────────────────────────────────────────────
+            if SYSTEM == "Darwin" and not _ax_trusted():
+                self._show_error(
+                    "⚠  Accessibility permission required.\n\n"
+                    "Go to: System Settings → Privacy & Security → Accessibility\n"
+                    "Enable KPrompter, then try the hotkey again."
+                )
                 self._busy = False
                 return
 
-            is_first = self._ask_first_message_mode()
-            if self._root:
-                self._root.after(0, self._start_spinner)
+            # ── Grab text NOW before any sleep (we're on a fresh thread, not tap thread) ──
+            original_cb = ""
+            if pre_captured_text and pre_captured_text.strip():
+                text = pre_captured_text
+            elif SYSTEM == "Darwin":
+                text = grab_selected_text_now(source_app)
+                original_cb = ""
+            else:
+                time.sleep(0.4)
+                text, original_cb = get_selected_text("")
 
+            # Brief pause for key releases to settle before we do anything else
+            time.sleep(0.3)
+            _dbg(f"[_run_flow] text={text[:50]!r} len={len(text)}")
+            if not text or not text.strip():
+                self._show_error(
+                    "No text selected.\n\n"
+                    "Select text in another app first, then trigger the hotkey.\n\n"
+                    "If this keeps happening, check:\n"
+                    "System Settings → Privacy & Security → Accessibility → KPrompter ✓"
+                )
+                self._busy = False
+                return
+
+            # ── Show in Home tab + typing indicator ──────────────────────────
+            sw = getattr(self, "_settings_win", None)
+            is_first = len(self._conversation) == 0
+            if sw and self._root:
+                self._root.after(0, lambda t=text: sw.append_user_message(t))
+                self._root.after(0, sw.show_typing)
+
+            # ── Optimize ──────────────────────────────────────────────────────
             try:
                 result = optimize(
                     text,
@@ -193,119 +244,151 @@ class KPrompter:
                     conversation_history=self._conversation if not is_first else None,
                 )
             except Exception as e:
-                self._stop_spinner()
+                if sw and self._root:
+                    self._root.after(0, sw.hide_typing)
                 self._show_error(str(e))
                 return
 
-            self._stop_spinner()
+            if sw and self._root:
+                self._root.after(0, sw.hide_typing)
 
             if not result or not result.strip():
                 self._show_error("AI returned an empty response. Please try again.")
                 return
 
-            # Detect if model is asking clarifying questions
-            q_count = result.count("?")
+            # Detect clarifying questions (last line ends with "?" or ≥2 questions)
+            q_count   = result.count("?")
             last_line = result.strip().splitlines()[-1].strip() if result.strip() else ""
             is_question = last_line.endswith("?") or q_count >= 2
 
+            self._conversation.append({"role": "user",      "content": text})
+            self._conversation.append({"role": "assistant", "content": result})
+            if len(self._conversation) > 8:
+                self._conversation = self._conversation[-8:]
+
+            # ── Update Home tab with result ───────────────────────────────────
+            if sw and self._root:
+                self._root.after(0, lambda r=result: sw.append_ai_message(r))
+
+            # ── Paste or show question popup ──────────────────────────────────
             if is_question:
-                self._show_question_popup(result, text, original_cb, is_first)
+                # AI has questions — show a small floating popup, stay in source app
+                self._show_question_popup(result, original_cb, source_app)
             else:
+                if source_app and SYSTEM == "Darwin":
+                    activate_app(source_app)
+                    time.sleep(0.3)
                 paste_text(result, original_cb)
-                self._conversation.append({"role": "user", "content": text})
-                self._conversation.append({"role": "assistant", "content": result})
-                if len(self._conversation) > 6:
-                    self._conversation = self._conversation[-6:]
+
         except Exception as e:
-            self._stop_spinner()
             self._show_error(f"Unexpected error: {e}")
         finally:
             self._busy = False
 
-    def _ask_first_message_mode(self) -> bool:
+    def _show_question_popup(self, question_text: str, original_cb: str, source_app: str = ""):
+        """Show a small floating popup with the AI's question.
+        User types an answer → we send it back through optimize → paste result.
+        The main window is never shown."""
         if not self._root:
-            return True
-        result = {"value": True}
-        done = threading.Event()
+            return
 
-        def ask():
-            try:
-                win = tk.Toplevel(self._root)
-                win.title("KPrompter")
-                win.configure(bg="#0d0f13")
-                win.attributes("-topmost", True)
-                win.resizable(False, False)
-                sw, sh = win.winfo_screenwidth(), win.winfo_screenheight()
-                win.geometry(f"400x155+{(sw-400)//2}+{(sh-155)//2}")
+        def _open():
+            from gui import QuestionPopup
+            def on_answer(answer: str):
+                if answer and answer.strip():
+                    threading.Thread(
+                        target=self._run_answer_flow,
+                        args=(answer, original_cb, source_app),
+                        daemon=True,
+                    ).start()
+            QuestionPopup(self._root, question_text, on_answer=on_answer)
 
-                tk.Label(
-                    win, text="Is this the first message in a new project?",
-                    bg="#0d0f13", fg="#e8eaf0",
-                    font=("Menlo", 12) if SYSTEM == "Darwin" else ("Consolas", 11),
-                    wraplength=360,
-                ).pack(pady=(24, 14))
+        self._root.after(0, _open)
 
-                row = tk.Frame(win, bg="#0d0f13")
-                row.pack()
-
-                def yes():
-                    result["value"] = True
-                    win.destroy()
-                    done.set()
-
-                def no():
-                    result["value"] = False
-                    win.destroy()
-                    done.set()
-
-                for label, cmd, bg, fg in [
-                    ("Yes — new project", yes, "#4af0a0", "#0d0f13"),
-                    ("No — continuing",   no,  "#1a1e27", "#e8eaf0"),
-                ]:
-                    b = tk.Button(row, text=label, command=cmd, bg=bg, fg=fg,
-                                  activebackground=bg, activeforeground=fg,
-                                  relief="flat", bd=0, padx=14, pady=8,
-                                  cursor="hand2",
-                                  font=("Menlo", 11) if SYSTEM == "Darwin" else ("Consolas", 10))
-                    b.pack(side="left", padx=8)
-
-                win.protocol("WM_DELETE_WINDOW", yes)
-            except Exception:
-                done.set()
-
-        self._root.after(0, ask)
-        done.wait(timeout=30)
-        return result["value"]
-
-    def _show_question_popup(self, questions, original_text, original_cb, is_first):
-        def on_answer(answer):
-            combined = f"{original_text}\n\n[Answers to clarifying questions]\n{answer}"
-            threading.Thread(
-                target=self._run_with_text,
-                args=(combined, original_cb, is_first),
-                daemon=True,
-            ).start()
-
-        if self._root:
-            self._root.after(0, lambda: ResultPopup(
-                self._root, questions, is_question=True,
-                on_answer=on_answer, original_text=original_text,
-            ))
-
-    def _run_with_text(self, text, original_cb, is_first):
+    def _run_answer_flow(self, answer: str, original_cb: str, source_app: str):
+        """After user answers the AI's question, optimize again and paste."""
         self._busy = True
         try:
             result = optimize(
-                text, is_first_message=is_first,
-                conversation_history=self._conversation if not is_first else None,
+                answer,
+                is_first_message=False,
+                conversation_history=self._conversation if self._conversation else None,
             )
-            paste_text(result, original_cb)
-            self._conversation.append({"role": "user", "content": text})
+            if not result or not result.strip():
+                self._show_error("AI returned an empty response. Please try again.")
+                return
+            self._conversation.append({"role": "user",      "content": answer})
             self._conversation.append({"role": "assistant", "content": result})
-            if len(self._conversation) > 6:
-                self._conversation = self._conversation[-6:]
+            if len(self._conversation) > 8:
+                self._conversation = self._conversation[-8:]
+            if source_app and SYSTEM == "Darwin":
+                activate_app(source_app)
+                time.sleep(0.3)
+            paste_text(result, original_cb)
         except Exception as e:
             self._show_error(str(e))
+        finally:
+            self._busy = False
+
+    def _clear_conversation(self):
+        self._conversation = []
+
+    def _retry_input(self, text):
+        if self._busy: return
+        threading.Thread(target=self._run_input_flow, args=(text,), daemon=True).start()
+
+    def _optimize_from_input(self, text):
+        """Called by the Home tab Optimize button — no clipboard/paste, just show result popup."""
+        if self._busy or not text.strip():
+            return
+        threading.Thread(target=self._run_input_flow, args=(text,), daemon=True).start()
+
+    def _run_input_flow(self, text):
+        self._busy = True
+        sw = getattr(self, '_settings_win', None)
+        try:
+            is_first = len(self._conversation) == 0
+            if self._root:
+                if sw:
+                    # Show user message immediately + typing indicator in the Home chat
+                    self._root.after(0, lambda t=text: sw.append_user_message(t))
+                    self._root.after(0, sw.show_typing)
+                else:
+                    self._root.after(0, self._start_spinner)
+            try:
+                result = optimize(
+                    text, is_first_message=is_first,
+                    conversation_history=self._conversation if not is_first else None,
+                )
+            except Exception as e:
+                if self._root:
+                    if sw:
+                        self._root.after(0, sw.hide_typing)
+                    else:
+                        self._stop_spinner()
+                self._show_error(str(e))
+                return
+            if self._root:
+                if sw:
+                    self._root.after(0, sw.hide_typing)
+                else:
+                    self._stop_spinner()
+            if not result or not result.strip():
+                self._show_error("AI returned an empty response. Please try again.")
+                return
+            self._conversation.append({"role": "user", "content": text})
+            self._conversation.append({"role": "assistant", "content": result})
+            if len(self._conversation) > 8:
+                self._conversation = self._conversation[-8:]
+            if self._root and sw:
+                self._root.after(0, lambda r=result: sw.append_ai_message(r))
+        except Exception as e:
+            if self._root:
+                if sw:
+                    self._root.after(0, sw.hide_typing)
+                else:
+                    self._stop_spinner()
+            self._show_error(f"Unexpected error: {e}")
         finally:
             self._busy = False
 
@@ -328,9 +411,28 @@ class KPrompter:
         if self._root:
             self._root.after(0, lambda m=msg: mb.showerror("KPrompter Error", m))
 
+    def _restart_hotkey(self, new_hotkey: str):
+        """Swap in a new hotkey without restarting the app."""
+        if self._listener:
+            try:
+                self._listener.stop()
+            except Exception:
+                pass
+            self._listener = None
+        if self._hotkey_monitor:
+            self._hotkey_monitor.stop()
+            self._hotkey_monitor = None
+        if SYSTEM == "Darwin":
+            self._start_hotkey_macos(new_hotkey)
+        else:
+            self._start_hotkey_pynput(new_hotkey)
+
     def open_settings(self):
         if self._root:
-            self._root.after(0, lambda: SettingsWindow(self._root))
+            if self._settings_win is not None:
+                self._root.after(0, self._settings_win.switch_to_settings)
+            else:
+                self._root.after(0, lambda: SettingsWindow(self._root))
 
     def quit_app(self):
         if self._listener:
@@ -338,16 +440,9 @@ class KPrompter:
                 self._listener.stop()
             except Exception:
                 pass
-        if self._hotkey_proc:
-            try:
-                self._hotkey_proc.terminate()
-                self._hotkey_proc.wait(timeout=2)
-            except Exception:
-                try:
-                    self._hotkey_proc.kill()
-                except Exception:
-                    pass
-            self._hotkey_proc = None
+        if self._hotkey_monitor:
+            self._hotkey_monitor.stop()
+            self._hotkey_monitor = None
         if self._tray:
             try:
                 self._tray.stop()
@@ -359,92 +454,161 @@ class KPrompter:
             except Exception:
                 pass
 
-    def _setup_macos_menu(self):
-        """Create a tkinter menu bar on macOS to replace the pystray tray icon."""
-        menubar = tk.Menu(self._root)
-        app_menu = tk.Menu(menubar, name="apple", tearoff=0)
-        app_menu.add_command(label="Settings…", command=self.open_settings)
-        app_menu.add_separator()
-        app_menu.add_command(label="Quit KPrompter", command=self.quit_app)
-        menubar.add_cascade(menu=app_menu)
-        self._root.config(menu=menubar)
+    def _show_about(self):
+        import tkinter.messagebox as mb
+        mb.showinfo("About KPrompter",
+                    "KPrompter\n\nTransform rough text into AI-ready prompts.\n\n"
+                    "github.com/ktorres0109/kprompter")
 
-    def _trigger_optimize(self):
-        """Trigger the optimize flow from the macOS window button."""
-        if not self._busy:
-            threading.Thread(target=self._run_flow, daemon=True).start()
+    def _setup_macos_menu(self):
+        """Create a native macOS menu bar with File, View, Window, Help menus."""
+        menubar = tk.Menu(self._root)
+
+        # Apple menu
+        app_menu = tk.Menu(menubar, name="apple", tearoff=0)
+        app_menu.add_command(label="About KPrompter", command=self._show_about)
+        app_menu.add_separator()
+        app_menu.add_command(label="Settings…", command=self.open_settings,
+                             accelerator="Command+,")
+        app_menu.add_separator()
+        app_menu.add_command(label="Quit KPrompter", command=self.quit_app,
+                             accelerator="Command+Q")
+        menubar.add_cascade(menu=app_menu)
+
+        # File menu
+        file_menu = tk.Menu(menubar, tearoff=0)
+        file_menu.add_command(label="New Project Window", command=self._new_project_window,
+                              accelerator="Command+N")
+        menubar.add_cascade(label="File", menu=file_menu)
+
+        # View menu
+        view_menu = tk.Menu(menubar, tearoff=0)
+        view_menu.add_command(label="Settings", command=self.open_settings,
+                              accelerator="Command+,")
+        menubar.add_cascade(label="View", menu=view_menu)
+
+        # Window menu (name="window" → macOS manages minimize/zoom entries)
+        window_menu = tk.Menu(menubar, name="window", tearoff=0)
+        window_menu.add_command(label="Minimize", command=self._root.iconify,
+                                accelerator="Command+M")
+        menubar.add_cascade(label="Window", menu=window_menu)
+
+        # Help menu (name="help" → macOS adds the search field)
+        help_menu = tk.Menu(menubar, name="help", tearoff=0)
+        help_menu.add_command(
+            label="KPrompter on GitHub",
+            command=lambda: webbrowser.open("https://github.com/ktorres0109/kprompter"),
+        )
+        menubar.add_cascade(label="Help", menu=help_menu)
+
+        self._root.config(menu=menubar)
+        self._root.bind("<Command-comma>", lambda e: self.open_settings())
+        self._root.bind("<Command-q>", lambda e: self.quit_app())
+        self._root.bind("<Command-m>", lambda e: self._root.iconify())
+        self._root.bind("<Command-n>", lambda e: self._new_project_window())
+        self._root.createcommand("tk::mac::Quit", self.quit_app)
+
+    def _new_project_window(self):
+        """Open a new project window with its own conversation context."""
+        if self._root:
+            from gui import ProjectWindow
+            pw = ProjectWindow(
+                self._root,
+                on_optimize=self._optimize_for_project,
+            )
+            self._project_windows.append(pw)
+
+    def _optimize_for_project(self, text: str, project):
+        """Run optimization for a project window (uses project's conversation)."""
+        if not text.strip():
+            return
+        threading.Thread(
+            target=self._run_project_flow, args=(text, project), daemon=True
+        ).start()
+
+    def _run_project_flow(self, text: str, project):
+        """Like _run_input_flow but operates on the project's conversation list."""
+        project.busy = True
+        try:
+            is_first = len(project.conversation) == 0
+            try:
+                result = optimize(
+                    text, is_first_message=is_first,
+                    conversation_history=project.conversation if not is_first else None,
+                )
+            except Exception as e:
+                self._show_error(str(e))
+                return
+            if not result or not result.strip():
+                return
+            project.conversation.append({"role": "user", "content": text})
+            project.conversation.append({"role": "assistant", "content": result})
+            if len(project.conversation) > 6:
+                project.conversation = project.conversation[-6:]
+            sw = getattr(self, "_settings_win", None)
+            if sw and self._root:
+                self._root.after(0, lambda r=result: sw.append_ai_message(r))
+        except Exception:
+            pass
+        finally:
+            project.busy = False
 
     def _setup_macos_window(self, cfg):
-        """Configure the root window as a visible status window on macOS.
-
-        On macOS there is no tray icon, so the root window must remain
-        visible for the user to interact with the app.
-        """
-        self._root.configure(bg="#0f1117")
-        w, h = 420, 380
+        """Single unified window: Home tab (status) + Settings tabs in one notebook."""
+        self._root.configure(bg="#1c1c1e")
+        self._root.minsize(620, 500)
+        w, h = 780, 640
         sw = self._root.winfo_screenwidth()
         sh = self._root.winfo_screenheight()
         self._root.geometry(f"{w}x{h}+{(sw - w) // 2}+{(sh - h) // 2}")
-        self._root.resizable(False, False)
-
-        hotkey = cfg.get("hotkey", "ctrl+alt+g")
-        provider = cfg.get("provider", "openrouter")
-        model = cfg.get("model", "")
-
-        tk.Label(
-            self._root, text="K>", font=("Menlo", 36, "bold"),
-            bg="#0f1117", fg="#4a90e2",
-        ).pack(pady=(28, 4))
-
-        tk.Label(
-            self._root, text="KPrompter is running",
-            font=("Menlo", 14), bg="#0f1117", fg="#e4e8f1",
-        ).pack()
-
-        tk.Label(
-            self._root, text=f"Hotkey: {hotkey}",
-            font=("Menlo", 12), bg="#0f1117", fg="#6b7a99",
-        ).pack(pady=(12, 2))
-
-        tk.Label(
-            self._root, text=f"Provider: {provider}" + (f"  •  {model}" if model else ""),
-            font=("Menlo", 11), bg="#0f1117", fg="#6b7a99",
-        ).pack()
-
-        btn_frame = tk.Frame(self._root, bg="#0f1117")
-        btn_frame.pack(pady=(18, 0))
-        tk.Button(
-            btn_frame, text="Settings", command=self.open_settings,
-            bg="#1c2030", fg="#e4e8f1", activebackground="#222738",
-            activeforeground="#e4e8f1", relief="flat", bd=0,
-            padx=16, pady=6, cursor="hand2", font=("Menlo", 11),
-        ).pack(side="left", padx=6)
-        tk.Button(
-            btn_frame, text="Quit", command=self.quit_app,
-            bg="#1c2030", fg="#e4e8f1", activebackground="#222738",
-            activeforeground="#e4e8f1", relief="flat", bd=0,
-            padx=16, pady=6, cursor="hand2", font=("Menlo", 11),
-        ).pack(side="left", padx=6)
-
-        # ── Optimize trigger button ──────────────────────────────────────
-        tk.Frame(self._root, bg="#0f1117", height=18).pack()
-        trigger_btn = tk.Button(
-            self._root, text="Optimize Selected Text",
-            command=self._trigger_optimize,
-            bg="#4a90e2", fg="#ffffff",
-            activebackground="#3a7bd5", activeforeground="#ffffff",
-            relief="flat", bd=0, padx=24, pady=10, cursor="hand2",
-            font=("Menlo", 13, "bold"),
+        self._root.resizable(True, True)
+        # Deiconify BEFORE building the UI so Canvas widgets can draw
+        # (Canvas.create_* fails in withdrawn/unmapped windows on Python 3.14)
+        self._root.deiconify()
+        self._root.update_idletasks()
+        self._settings_win = SettingsWindow(
+            container=self._root, show_home=True,
+            on_optimize=self._optimize_from_input,
+            on_retry=self._retry_input,
+            on_hotkey_change=self._restart_hotkey,
         )
-        trigger_btn.pack()
-        tk.Label(
-            self._root,
-            text="Select text in any app, then click above",
-            font=("Menlo", 10), bg="#0f1117", fg="#6b7a99",
-        ).pack(pady=(6, 0))
+        self._settings_win._on_clear_conversation = self._clear_conversation
+        if hasattr(self._settings_win, "render_history"):
+            self._settings_win.render_history(getattr(self, "_conversation", []))
+
+    def _check_accessibility(self):
+        """Open System Settings → Accessibility once if not yet trusted."""
+        if SYSTEM != "Darwin":
+            return
+        if getattr(self, "_accessibility_prompted", False):
+            return  # Already opened Settings this session — don't spam
+        try:
+            import ctypes
+            ax = ctypes.cdll.LoadLibrary(
+                "/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices"
+            )
+            ax.AXIsProcessTrusted.restype = ctypes.c_bool
+            if ax.AXIsProcessTrusted():
+                self._accessibility_prompted = True
+                return  # Already granted — do nothing
+            # Open Settings exactly once
+            self._accessibility_prompted = True
+            subprocess.run(
+                ["open",
+                 "x-apple.systempreferences:com.apple.preference.security"
+                 "?Privacy_Accessibility"],
+                check=False,
+            )
+        except Exception:
+            pass
+
 
     def run(self):
-        gen_icon()
+        # Only generate icon in dev mode — frozen builds have the icon already bundled.
+        # Re-generating overwrites it with a runtime-generated file that the OS
+        # doesn't pick up for the Dock/Accessibility panel.
+        if not getattr(sys, "frozen", False):
+            gen_icon()
 
         self._root = tk.Tk()
         self._root.title("KPrompter")
@@ -473,13 +637,13 @@ class KPrompter:
             # on macOS initializes AppKit and causes SIGTRAP crashes.
             self._tray = None
             self._setup_macos_menu()
-            self._setup_macos_window(cfg)
-            self._root.deiconify()
+            self._setup_macos_window(cfg)  # deiconifies internally
             # macOS: close button (red X) hides window to dock.
-            # Clicking the dock icon reopens it.  Quit via menu or button.
+            # Clicking the dock icon reopens it.  Quit via menu bar.
             self._root.protocol("WM_DELETE_WINDOW", self._root.withdraw)
             self._root.createcommand("tk::mac::ReopenApplication",
                                      self._root.deiconify)
+            # Accessibility is checked inside _start_hotkey_macos when the tap fails.
         else:
             # Lazy import: tray.py imports pystray which touches AppKit on
             # macOS.  By importing only inside this non-Darwin branch we
@@ -509,14 +673,4 @@ class KPrompter:
 
 
 if __name__ == "__main__":
-    # When the frozen app is re-invoked with --hotkey-subprocess, run only
-    # the hotkey listener (no GUI, no tkinter) and exit when done.  This
-    # gives the child process its own AppKit/Quartz context.
-    if "--hotkey-subprocess" in sys.argv:
-        idx = sys.argv.index("--hotkey-subprocess")
-        _hk = sys.argv[idx + 1] if idx + 1 < len(sys.argv) else "ctrl+alt+g"
-        from hotkey_macos import main as _hotkey_main
-        sys.argv = [sys.argv[0], _hk]  # hotkey_macos reads sys.argv[1]
-        _hotkey_main()
-    else:
-        KPrompter().run()
+    KPrompter().run()

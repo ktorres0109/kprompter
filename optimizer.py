@@ -1,5 +1,5 @@
 import requests
-from config import load_config, get_system_prompt, log_entry, PROVIDERS
+from config import load_config, get_system_prompt, get_custom_instructions, log_entry, PROVIDERS, fetch_ollama_models
 
 
 def call_openai_compatible(base_url: str, api_key: str, model: str,
@@ -29,7 +29,10 @@ def call_openai_compatible(base_url: str, api_key: str, model: str,
             body = resp.text[:200]
         raise RuntimeError(f"API error ({resp.status_code}): {body}")
 
-    data = resp.json()
+    try:
+        data = resp.json()
+    except Exception:
+        raise RuntimeError(f"API returned malformed JSON: {resp.text[:200]}")
     try:
         content = data["choices"][0]["message"]["content"]
         if content is None:
@@ -64,7 +67,10 @@ def call_anthropic(api_key: str, model: str, system: str, messages: list) -> str
             body = resp.text[:200]
         raise RuntimeError(f"Anthropic API error ({resp.status_code}): {body}")
 
-    data = resp.json()
+    try:
+        data = resp.json()
+    except Exception:
+        raise RuntimeError(f"Anthropic API returned malformed JSON: {resp.text[:200]}")
     try:
         text = data["content"][0]["text"]
         if text is None:
@@ -104,7 +110,9 @@ def optimize(raw_text: str, is_first_message: bool = True,
         "CONTINUATION MODE: This is an ongoing project. Do NOT repeat role/context/setup. "
         "Output only the next clean instruction or delta."
     )
-    full_system = f"{system_prompt}\n\n---\nMODE: {mode_note}"
+    custom = get_custom_instructions()
+    user_context = f"\n\n---\nUSER CONTEXT (always apply):\n{custom}" if custom else ""
+    full_system = f"{system_prompt}{user_context}\n\n---\nMODE: {mode_note}"
 
     messages = [{"role": "system", "content": full_system}]
     if conversation_history:
@@ -115,7 +123,8 @@ def optimize(raw_text: str, is_first_message: bool = True,
         result = call_anthropic(api_key, model, full_system,
                                 [m for m in messages if m["role"] != "system"])
     elif provider == "ollama":
-        result = call_openai_compatible(pinfo["base_url"], "ollama", model, messages)
+        ollama_base = cfg.get("ollama_url", "http://localhost:11434").rstrip("/") + "/v1"
+        result = call_openai_compatible(ollama_base, "", model, messages)
     elif provider == "openrouter":
         result = call_openai_compatible(
             pinfo["base_url"], api_key, model, messages,
