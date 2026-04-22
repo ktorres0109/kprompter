@@ -1,16 +1,15 @@
-import os
 import platform
 import subprocess
 import time
 import uuid
 
-_DEBUG = os.environ.get("KP_DEBUG") == "1"
+from config import _dbg
 
 
-def _dbg(msg: str):
-    if _DEBUG:
-        with open("/tmp/kp_debug.log", "a") as _f:
-            _f.write(msg + "\n")
+def _as_str(s: str) -> str:
+    """Escape a string for use inside an AppleScript double-quoted literal."""
+    return s.replace("\\", "\\\\").replace('"', '\\"')
+
 
 def _hid_release_modifiers():
     """Post key-up events for Cmd, Alt, Shift, Ctrl at HID level to clear any held modifiers."""
@@ -233,10 +232,6 @@ def paste_text(text: str, original_clipboard: str = None):
     see the original clipboard before and after — not the intermediate state.
     """
     if SYSTEM == "Darwin":
-        # Escape backslashes and double-quotes for AppleScript string literals.
-        def _as_str(s: str) -> str:
-            return s.replace("\\", "\\\\").replace('"', '\\"')
-
         paste_escaped    = _as_str(text)
         restore_escaped  = _as_str(original_clipboard or "")
 

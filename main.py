@@ -11,20 +11,13 @@ import os
 import subprocess
 import webbrowser
 
-from config import load_config, is_first_run, PROVIDERS, get_best_model
+from config import load_config, is_first_run, PROVIDERS, get_best_model, _dbg
 from optimizer import optimize
 from clipboard import get_selected_text, paste_text, get_frontmost_app, activate_app, grab_selected_text_now
 from gui import SetupWizard, SettingsWindow, LoadingPopup
 from icon_gen import generate as gen_icon
 
 SYSTEM = platform.system()
-_DEBUG = os.environ.get("KP_DEBUG") == "1"
-
-
-def _dbg(msg: str):
-    if _DEBUG:
-        with open("/tmp/kp_debug.log", "a") as _f:
-            _f.write(msg + "\n")
 
 
 def _ax_trusted() -> bool:
@@ -45,6 +38,7 @@ def _ax_trusted() -> bool:
 class KPrompter:
     def __init__(self):
         self._busy = False
+        self._busy_lock = threading.Lock()
         self._conversation: list = []
         self._project_windows: list = []
         self._tray = None
@@ -84,16 +78,19 @@ class KPrompter:
         from hotkey_macos import HotkeyMonitor
 
         def _on_hotkey():
-            if not self._busy:
-                # Only capture app name on tap thread — text grab needs its own thread
-                # so HID events aren't posted from within the tap callback context.
-                app_at_keypress = get_frontmost_app()
-                _dbg(f"[_on_hotkey] app={app_at_keypress!r}")
-                threading.Thread(
-                    target=self._run_flow,
-                    args=(app_at_keypress, ""),
-                    daemon=True
-                ).start()
+            with self._busy_lock:
+                if self._busy:
+                    return
+                self._busy = True
+            # Only capture app name on tap thread — text grab needs its own thread
+            # so HID events aren't posted from within the tap callback context.
+            app_at_keypress = get_frontmost_app()
+            _dbg(f"[_on_hotkey] app={app_at_keypress!r}")
+            threading.Thread(
+                target=self._run_flow,
+                args=(app_at_keypress, ""),
+                daemon=True
+            ).start()
 
         monitor = HotkeyMonitor(hotkey_str, callback=_on_hotkey)
 
@@ -191,7 +188,6 @@ class KPrompter:
 
     def _run_flow(self, source_app: str = "", pre_captured_text: str = ""):
         """Called by the hotkey: grab selection → optimize → paste back. Silent — no UI."""
-        self._busy = True
         try:
             _dbg(f"[_run_flow] source_app={source_app!r}")
 
@@ -334,17 +330,23 @@ class KPrompter:
         self._conversation = []
 
     def _retry_input(self, text):
-        if self._busy: return
+        with self._busy_lock:
+            if self._busy:
+                return
+            self._busy = True
         threading.Thread(target=self._run_input_flow, args=(text,), daemon=True).start()
 
     def _optimize_from_input(self, text):
         """Called by the Home tab Optimize button — no clipboard/paste, just show result popup."""
-        if self._busy or not text.strip():
+        if not text.strip():
             return
+        with self._busy_lock:
+            if self._busy:
+                return
+            self._busy = True
         threading.Thread(target=self._run_input_flow, args=(text,), daemon=True).start()
 
     def _run_input_flow(self, text):
-        self._busy = True
         sw = getattr(self, '_settings_win', None)
         try:
             is_first = len(self._conversation) == 0

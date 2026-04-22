@@ -498,8 +498,8 @@ class SetupWizard:
             for w in model_frame.winfo_children():
                 w.destroy()
             if not models:
-                status_lbl.configure(text="Could not fetch models — check API key", fg=RED)
-                self._model_cb = None
+                status_lbl.configure(text="Using built-in model list (API key needed to refresh)", fg=ORANGE)
+                _build_static()
                 return
             status_lbl.configure(text=f"{len(models)} models fetched", fg=GREEN)
             cb = ttk.Combobox(model_frame, textvariable=self._model_var,
@@ -1409,8 +1409,13 @@ class SettingsWindow:
             for w in model_frame.winfo_children():
                 w.destroy()
             if not models:
-                model_status.configure(text=error_msg, fg=RED)
-                _model_cb_ref[0] = None
+                p = prov_var.get()
+                if p == "gemini":
+                    model_status.configure(text="Fetch failed — showing built-in list", fg=ORANGE)
+                    _build_cloud_cb(p)
+                else:
+                    model_status.configure(text=error_msg, fg=RED)
+                    _model_cb_ref[0] = None
                 return
             model_status.configure(text=f"{len(models)} model(s) found", fg=GREEN)
             cb = ttk.Combobox(model_frame, textvariable=model_var,
@@ -1439,7 +1444,8 @@ class SettingsWindow:
         def refresh_gemini(*_):
             key = key_var.get().strip()
             if not key:
-                model_status.configure(text="Enter API key first", fg=RED)
+                model_status.configure(text="No key — showing built-in models", fg=ORANGE)
+                _build_cloud_cb("gemini")
                 return
             model_status.configure(text="Fetching…", fg=TEXT_DIM)
             def _fetch():

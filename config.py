@@ -12,6 +12,14 @@ try:
 except ImportError:
     requests = None
 
+_DEBUG = os.environ.get("KP_DEBUG") == "1"
+
+
+def _dbg(msg: str):
+    if _DEBUG:
+        with open("/tmp/kp_debug.log", "a") as _f:
+            _f.write(msg + "\n")
+
 
 def get_bundle_dir() -> Path:
     """Return the base directory for bundled resources.

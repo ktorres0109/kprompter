@@ -60,13 +60,20 @@ _NS_MOD_FLAGS = {
 }
 
 
-import os as _os
-_DEBUG = _os.environ.get("KP_DEBUG") == "1"
+from config import _dbg
 
-def _dbg(msg):
-    if _DEBUG:
-        with open("/tmp/kp_debug.log", "a") as f:
-            f.write(msg + "\n")
+# Keycode → modifier flag mask for tracking held modifiers in CGEventTap.
+# Defined once at module level — not rebuilt per call.
+_MOD_KEYCODES = {
+    54: 0x00100000,  # right cmd
+    55: 0x00100000,  # left cmd
+    56: 0x00020000,  # left shift
+    58: 0x00080000,  # left option
+    59: 0x00040000,  # left ctrl
+    60: 0x00020000,  # right shift
+    61: 0x00080000,  # right option
+    62: 0x00040000,  # right ctrl
+}
 
 
 def _parse_hotkey(hotkey_str):
@@ -130,33 +137,25 @@ class HotkeyMonitor:
         registered = threading.Event()
         success = [False]
 
-        _MOD_KEYCODES = {
-            54: 0x00100000,  # right cmd
-            55: 0x00100000,  # left cmd
-            56: 0x00020000,  # left shift
-            58: 0x00080000,  # left option
-            59: 0x00040000,  # left ctrl
-            60: 0x00020000,  # right shift
-            61: 0x00080000,  # right option
-            62: 0x00040000,  # right ctrl
-        }
-        _current_mods = [0]
+        _current_mods = 0
 
         def _tap_thread():
+            nonlocal _current_mods
             import Quartz as Q
 
             def _handler(proxy, event_type, event, refcon):
+                nonlocal _current_mods
                 kc = Q.CGEventGetIntegerValueField(event, Q.kCGKeyboardEventKeycode)
                 if event_type == Q.kCGEventFlagsChanged:
                     mod_bit = _MOD_KEYCODES.get(kc, 0)
                     if mod_bit:
                         raw = Q.CGEventGetFlags(event)
                         if raw & mod_bit:
-                            _current_mods[0] |= mod_bit
+                            _current_mods |= mod_bit
                         else:
-                            _current_mods[0] &= ~mod_bit
+                            _current_mods &= ~mod_bit
                 elif event_type == Q.kCGEventKeyDown:
-                    mods = _current_mods[0]
+                    mods = _current_mods
                     _dbg(f"KeyDown kc={kc} mods=0x{mods:08x} req_kc={req_kc} req_mods=0x{req_mods:08x} match={kc==req_kc and mods==req_mods}")
                     if kc == req_kc and mods == req_mods:
                         cb()
@@ -199,7 +198,10 @@ class HotkeyMonitor:
 
         t = threading.Thread(target=_tap_thread, daemon=True)
         t.start()
-        registered.wait(timeout=3.0)
+        if not registered.wait(timeout=3.0):
+            # Thread timed out before signalling — stop it to prevent leak
+            self._tap_stop = True
+            return False
 
         if success[0]:
             return True
