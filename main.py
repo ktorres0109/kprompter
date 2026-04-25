@@ -254,11 +254,6 @@ class KPrompter:
                 self._show_error("AI returned an empty response. Please try again.")
                 return
 
-            # Detect clarifying questions (last line ends with "?" or ≥2 questions)
-            q_count   = result.count("?")
-            last_line = result.strip().splitlines()[-1].strip() if result.strip() else ""
-            is_question = last_line.endswith("?") or q_count >= 2
-
             self._conversation.append({"role": "user",      "content": text})
             self._conversation.append({"role": "assistant", "content": result})
             if len(self._conversation) > 8:
@@ -268,64 +263,14 @@ class KPrompter:
             if sw and self._root:
                 self._root.after(0, lambda r=result: sw.append_ai_message(r))
 
-            # ── Paste or show question popup ──────────────────────────────────
-            if is_question:
-                # AI has questions — show a small floating popup, stay in source app
-                self._show_question_popup(result, original_cb, source_app)
-            else:
-                if source_app and SYSTEM == "Darwin":
-                    activate_app(source_app)
-                    time.sleep(0.3)
-                paste_text(result, original_cb)
-
-        except Exception as e:
-            self._show_error(f"Unexpected error: {e}")
-        finally:
-            self._busy = False
-
-    def _show_question_popup(self, question_text: str, original_cb: str, source_app: str = ""):
-        """Show a small floating popup with the AI's question.
-        User types an answer → we send it back through optimize → paste result.
-        The main window is never shown."""
-        if not self._root:
-            return
-
-        def _open():
-            from gui import QuestionPopup
-            def on_answer(answer: str):
-                if answer and answer.strip():
-                    threading.Thread(
-                        target=self._run_answer_flow,
-                        args=(answer, original_cb, source_app),
-                        daemon=True,
-                    ).start()
-            QuestionPopup(self._root, question_text, on_answer=on_answer)
-
-        self._root.after(0, _open)
-
-    def _run_answer_flow(self, answer: str, original_cb: str, source_app: str):
-        """After user answers the AI's question, optimize again and paste."""
-        with self._busy_lock:
-            self._busy = True
-        try:
-            result = optimize(
-                answer,
-                is_first_message=False,
-                conversation_history=self._conversation if self._conversation else None,
-            )
-            if not result or not result.strip():
-                self._show_error("AI returned an empty response. Please try again.")
-                return
-            self._conversation.append({"role": "user",      "content": answer})
-            self._conversation.append({"role": "assistant", "content": result})
-            if len(self._conversation) > 8:
-                self._conversation = self._conversation[-8:]
+            # ── Paste result directly — no question popup ─────────────────────
             if source_app and SYSTEM == "Darwin":
                 activate_app(source_app)
                 time.sleep(0.3)
             paste_text(result, original_cb)
+
         except Exception as e:
-            self._show_error(str(e))
+            self._show_error(f"Unexpected error: {e}")
         finally:
             self._busy = False
 
@@ -582,30 +527,32 @@ class KPrompter:
             self._settings_win.render_history(getattr(self, "_conversation", []))
 
     def _check_accessibility(self):
-        """Open System Settings → Accessibility once if not yet trusted."""
+        """Prompt for Accessibility permission using the native macOS dialog.
+
+        AXIsProcessTrustedWithOptions with kAXTrustedCheckOptionPrompt=True
+        triggers the system alert "KPrompter would like to control this computer"
+        and opens System Settings → Accessibility automatically if denied.
+        Called once on startup and again when the CGEventTap fails.
+        """
         if SYSTEM != "Darwin":
             return
         if getattr(self, "_accessibility_prompted", False):
-            return  # Already opened Settings this session — don't spam
+            return
+        self._accessibility_prompted = True
         try:
-            import ctypes
-            ax = ctypes.cdll.LoadLibrary(
-                "/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices"
-            )
-            ax.AXIsProcessTrusted.restype = ctypes.c_bool
-            if ax.AXIsProcessTrusted():
-                self._accessibility_prompted = True
-                return  # Already granted — do nothing
-            # Open Settings exactly once
-            self._accessibility_prompted = True
-            subprocess.run(
-                ["open",
-                 "x-apple.systempreferences:com.apple.preference.security"
-                 "?Privacy_Accessibility"],
-                check=False,
-            )
+            from ApplicationServices import AXIsProcessTrustedWithOptions
+            AXIsProcessTrustedWithOptions({"AXTrustedCheckOptionPrompt": True})
         except Exception:
-            pass
+            # PyObjC fallback: open Settings directly
+            try:
+                subprocess.run(
+                    ["open",
+                     "x-apple.systempreferences:com.apple.preference.security"
+                     "?Privacy_Accessibility"],
+                    check=False,
+                )
+            except Exception:
+                pass
 
 
     def run(self):
@@ -630,6 +577,12 @@ class KPrompter:
         cfg = load_config()
         if not cfg.get("api_key") and cfg.get("provider") != "ollama":
             print("[KPrompter] Warning: No API key set. Open Settings to add one.")
+
+        # Prompt for Accessibility permission before starting the hotkey listener.
+        # This triggers the native macOS "KPrompter would like to control this
+        # computer" dialog so the user knows what to grant and where.
+        if SYSTEM == "Darwin":
+            self._check_accessibility()
 
         self._start_hotkey_listener()
 
