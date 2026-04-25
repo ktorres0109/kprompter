@@ -110,25 +110,28 @@ def _get_ax_selected_text(app_name: str = "") -> str:
         return ""
 
 
-def grab_selected_text_now(source_app: str = "") -> str:
+def grab_selected_text_now(source_app: str = "") -> tuple:
     """
     Grab selected text IMMEDIATELY — call this at hotkey time before any sleep.
     Tries AX first, then HID Cmd+C.
-    Returns the text or "" if nothing found.
+    Returns (text, original_clipboard) — original_clipboard can be used to
+    restore the clipboard after paste_text() is called.
     """
     if SYSTEM != "Darwin":
-        return ""
+        return "", ""
 
-    # 1. AX — works on native apps
+    # Capture original clipboard before touching anything
+    original = _get_clipboard()
+
+    # 1. AX — works on native apps, no clipboard manipulation needed
     ax_text = _get_ax_selected_text(source_app)
     if ax_text and ax_text.strip():
         _dbg(f"[grab_now] AX hit: {len(ax_text)} chars")
-        return ax_text
+        return ax_text, original
 
     # 2. HID Cmd+C — wait for hotkey modifiers to release first (brief delay)
     # so the copy doesn't get swallowed by the app thinking it's still part of
     # the hotkey chord. We use a sentinel to detect clipboard change.
-    original = _get_clipboard()
     sentinel = _SENTINEL_PREFIX + uuid.uuid4().hex
     _set_clipboard(sentinel)
 
@@ -143,11 +146,11 @@ def grab_selected_text_now(source_app: str = "") -> str:
         if candidate and candidate != sentinel:
             _set_clipboard(original)
             _dbg(f"[grab_now] HID copy hit: {len(candidate)} chars")
-            return candidate
+            return candidate, original
 
     _set_clipboard(original)
     _dbg("[grab_now] both AX and HID failed")
-    return ""
+    return "", original
 
 
 def get_selected_text(source_app: str = "") -> tuple:
@@ -224,28 +227,21 @@ def get_selected_text(source_app: str = "") -> tuple:
 def paste_text(text: str, original_clipboard: str = None):
     """Paste text in place, then restore original clipboard.
 
-    On macOS we use a single AppleScript block that:
-      1. Sets the clipboard to the result text
-      2. Sends Cmd+V to paste it
-      3. Immediately restores the original clipboard
-    All three steps happen in one script execution so clipboard managers
-    see the original clipboard before and after — not the intermediate state.
+    On macOS: use pbcopy to set clipboard (safe for all text including quotes
+    and special chars), then AppleScript keystroke to paste, then pbcopy to
+    restore. Avoids embedding arbitrary text in AppleScript string literals,
+    which breaks for text containing double quotes.
     """
     if SYSTEM == "Darwin":
-        paste_escaped    = _as_str(text)
-        restore_escaped  = _as_str(original_clipboard or "")
-
-        script = (
-            f'set the clipboard to "{paste_escaped}"\n'
-            f'delay 0.25\n'
-            f'tell application "System Events" to keystroke "v" using command down\n'
-            f'delay 0.35\n'
-            f'set the clipboard to "{restore_escaped}"'
-        )
         try:
-            subprocess.run(["osascript", "-e", script], check=True, timeout=6)
+            _set_clipboard(text)
+            time.sleep(0.25)
+            _applescript('tell application "System Events" to keystroke "v" using command down')
+            time.sleep(0.35)
+            if original_clipboard is not None:
+                _set_clipboard(original_clipboard)
         except Exception:
-            # Fallback: original approach
+            # Last-resort fallback
             try:
                 _set_clipboard(text)
             except Exception:

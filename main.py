@@ -170,8 +170,11 @@ class KPrompter:
         def on_press(key):
             pressed.add(_normalize(key))
             if target and target.issubset(pressed):
-                if not self._busy:
-                    threading.Thread(target=self._run_flow, daemon=True).start()
+                with self._busy_lock:
+                    if self._busy:
+                        return
+                    self._busy = True
+                threading.Thread(target=self._run_flow, daemon=True).start()
 
         def on_release(key):
             pressed.discard(_normalize(key))
@@ -206,8 +209,7 @@ class KPrompter:
             if pre_captured_text and pre_captured_text.strip():
                 text = pre_captured_text
             elif SYSTEM == "Darwin":
-                text = grab_selected_text_now(source_app)
-                original_cb = ""
+                text, original_cb = grab_selected_text_now(source_app)
             else:
                 time.sleep(0.4)
                 text, original_cb = get_selected_text("")
@@ -303,7 +305,8 @@ class KPrompter:
 
     def _run_answer_flow(self, answer: str, original_cb: str, source_app: str):
         """After user answers the AI's question, optimize again and paste."""
-        self._busy = True
+        with self._busy_lock:
+            self._busy = True
         try:
             result = optimize(
                 answer,

@@ -1123,6 +1123,7 @@ class SettingsWindow:
             self._ensure_chat_mode()
         self._home_chat.configure(state="normal")
         self._home_chat.tag_configure("right", justify="right")
+        self._home_chat.tag_configure("bold", font=(*FONT_MONO_SM[:2], "bold"))
         self._home_chat.tag_configure("user_bg", justify="right", background="#2e4a3e", foreground=ACCENT, spacing1=5, spacing3=5, font=FONT_MONO_SM, lmargin1=40, lmargin2=40)
         
         self._home_chat.insert("end", "\n\nYou\n", ("right", "bold"))
@@ -1143,6 +1144,7 @@ class SettingsWindow:
     def append_ai_message(self, text, is_history=False):
         self._home_chat.configure(state="normal")
         self._home_chat.tag_configure("left", justify="left")
+        self._home_chat.tag_configure("bold", font=(*FONT_MONO_SM[:2], "bold"))
         
         self._home_chat.insert("end", "\n\nAI\n", ("left", "bold"))
         insert_markdown(self._home_chat, text, align="left", bg_color=BG)
