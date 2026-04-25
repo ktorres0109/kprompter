@@ -8,5 +8,5 @@ requests>=2.31.0
 # macOS only — Accessibility API, CGEventTap, NSEvent
 pyobjc-core>=9.0; sys_platform == "darwin"
 pyobjc-framework-Quartz>=9.0; sys_platform == "darwin"
-pyobjc-framework-AppKit>=9.0; sys_platform == "darwin"
+pyobjc-framework-Cocoa>=9.0; sys_platform == "darwin"
 pyobjc-framework-ApplicationServices>=9.0; sys_platform == "darwin"
