@@ -5,7 +5,6 @@ import subprocess
 import webbrowser
 import threading
 import os
-import re
 from config import (
     load_config, save_config,
     load_log, clear_log, is_first_run,
@@ -30,7 +29,7 @@ BTN_H     = "#3a5f4e"     # green-tinted button hover
 TAB_ACT   = "#2e4a3e"     # active tab (green tint)
 TAB_ACTH  = "#3a5f4e"     # active tab hover
 GREEN     = "#4af0a0"     # success green
-GREEN_H   = "#3dd88e"
+
 TEXT      = "#e8ffe8"     # slightly warm white with green tint
 TEXT_DIM  = "#7a9e8a"     # muted green-grey
 RED       = "#ff453a"     # macOS red
@@ -759,57 +758,6 @@ class SetupWizard:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-def insert_markdown(st, text, base_font=("SF Mono", 11), align="left", text_color="#ffffff", bg_color="#2c2c2e"):
-    """A lightweight markdown-like renderer for Tkinter ScrolledText."""
-    st.tag_configure("h1", font=(base_font[0], base_font[1]+4, "bold"), foreground=text_color)
-    st.tag_configure("h2", font=(base_font[0], base_font[1]+2, "bold"), foreground=text_color)
-    st.tag_configure("h3", font=(base_font[0], base_font[1], "bold"), foreground=text_color)
-    st.tag_configure("bold", font=(base_font[0], base_font[1], "bold"))
-    st.tag_configure("italic", font=(base_font[0], base_font[1], "italic"))
-    st.tag_configure("code", background="#1c1c1e", foreground="#ffd60a", font=base_font)
-    st.tag_configure("pre", background="#1c1c1e", foreground="#ffffff", font=base_font)
-    
-    st.tag_configure(align, justify=align)
-    
-    lines = text.splitlines()
-    in_pre = False
-    for line in lines:
-        if line.strip().startswith("```"):
-            in_pre = not in_pre
-            continue
-        
-        if in_pre:
-            st.insert("end", line + "\n", ("pre", align))
-            continue
-            
-        if line.startswith("# "):
-            st.insert("end", line[2:] + "\n", ("h1", align))
-            continue
-        elif line.startswith("## "):
-            st.insert("end", line[3:] + "\n", ("h2", align))
-            continue
-        elif line.startswith("### "):
-            st.insert("end", line[4:] + "\n", ("h3", align))
-            continue
-            
-        tokens = re.split(r"(\*\*.*?\*\*|\*.*?\*|`.*?`)", line)
-        for t in tokens:
-            if t.startswith("**") and t.endswith("**") and len(t) > 3:
-                st.insert("end", t[2:-2], ("bold", align))
-            elif t.startswith("*") and t.endswith("*") and len(t) > 1 and not t == "**":
-                st.insert("end", t[1:-1], ("italic", align))
-            elif t.startswith("`") and t.endswith("`") and len(t) > 1:
-                st.insert("end", t[1:-1], ("code", align))
-            else:
-                st.insert("end", t, align)
-        # Using double escaping for newlines because we are writing inside a python multi-line string inside python
-        st.insert("end", "\n", align)
-
-    if lines:
-        st.delete("end-1c", "end")
-
-
-# ══════════════════════════════════════════════════════════════════════════════
 # PILL TEXT INPUT COMPONENT
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -1051,8 +999,10 @@ class SettingsWindow:
         self._perm_poll()
 
     def _perm_poll(self):
-        """Refresh permission labels every 2 s."""
+        """Refresh permission labels every 2 s. Stops if window is destroyed."""
         try:
+            if not self.root.winfo_exists():
+                return
             ax_ok = _ax_trusted()
             im_ok = _im_trusted()
             if hasattr(self, "_perm_ax_lbl"):
@@ -1931,120 +1881,3 @@ class LoadingPopup:
             self.root.destroy()
         except Exception:
             pass
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# QUESTION POPUP — shown when the AI has a clarifying question
-# ══════════════════════════════════════════════════════════════════════════════
-
-class QuestionPopup:
-    """Small floating window that shows the AI's question and lets the user
-    type an answer.  The main KPrompter window is never shown.
-
-    on_answer(str) is called with the user's reply when they submit.
-    Dismissing without answering calls on_answer("").
-    """
-
-    _W = 480
-
-    def __init__(self, parent, question_text: str, on_answer=None):
-        self._on_answer = on_answer
-        self._answered  = False
-
-        self.root = tk.Toplevel(parent)
-        self.root.title("KPrompter — Question")
-        self.root.configure(bg=BG)
-        self.root.resizable(False, False)
-        self.root.attributes("-topmost", True)
-
-        # ── Question label ────────────────────────────────────────────────────
-        pad = tk.Frame(self.root, bg=BG)
-        pad.pack(fill="both", expand=True, padx=18, pady=(16, 10))
-
-        tk.Label(pad, text="K>  AI has a question:", bg=BG, fg=ACCENT,
-                 font=(FONT_MONO[0], 9, "bold"), anchor="w").pack(fill="x")
-        _spacer(pad, 6).pack()
-
-        # Show the AI's question text (word-wrapped)
-        q_label = tk.Label(pad, text=question_text,
-                           bg=BG2, fg=TEXT,
-                           font=FONT_UI, wraplength=self._W - 36,
-                           justify="left", anchor="nw",
-                           padx=10, pady=10)
-        q_label.pack(fill="x")
-
-        _spacer(pad, 10).pack()
-
-        # ── Answer entry ──────────────────────────────────────────────────────
-        tk.Label(pad, text="Your answer:", bg=BG, fg=TEXT_DIM,
-                 font=FONT_UI_SM, anchor="w").pack(fill="x")
-        _spacer(pad, 4).pack()
-
-        # Multi-line Text widget: Enter=submit, Shift+Enter=newline
-        self._text = tk.Text(pad, height=4, width=52,
-                             bg=BG3, fg=TEXT, insertbackground=ACCENT,
-                             relief="flat", bd=0, font=FONT_MONO,
-                             highlightthickness=2, highlightbackground=BORDER,
-                             highlightcolor=ACCENT, wrap="word",
-                             padx=8, pady=6)
-        self._text.pack(fill="x")
-        self._text.focus_set()
-
-        # Enter submits; Shift+Enter inserts a real newline
-        self._text.bind("<Return>",       self._on_return)
-        self._text.bind("<Shift-Return>", self._on_shift_return)
-
-        _spacer(pad, 10).pack()
-
-        # ── Buttons ───────────────────────────────────────────────────────────
-        btn_row = tk.Frame(pad, bg=BG)
-        btn_row.pack(anchor="e")
-
-        _btn(btn_row, "Skip",   self._skip,   accent=False, small=True).pack(side="left", padx=(0, 6))
-        _btn(btn_row, "Submit", self._submit, accent=True,  small=True).pack(side="left")
-
-        self.root.bind("<Escape>",  lambda e: self._skip())
-        self.root.protocol("WM_DELETE_WINDOW", self._skip)
-
-        # ── Centre on screen ──────────────────────────────────────────────────
-        self.root.update_idletasks()
-        h = self.root.winfo_reqheight()
-        sw = self.root.winfo_screenwidth()
-        sh = self.root.winfo_screenheight()
-        x  = (sw - self._W) // 2
-        y  = (sh - h) // 3
-        self.root.geometry(f"{self._W}x{h}+{x}+{y}")
-        self.root.deiconify()
-
-    def _on_return(self, event):
-        """Enter alone submits."""
-        self._submit()
-        return "break"  # prevent the newline from being inserted
-
-    def _on_shift_return(self, event):
-        """Shift+Enter inserts a newline."""
-        self._text.insert("insert", "\n")
-        return "break"
-
-    def _submit(self):
-        if self._answered:
-            return
-        self._answered = True
-        answer = self._text.get("1.0", "end-1c").strip()
-        try:
-            self.root.destroy()
-        except Exception:
-            pass
-        if self._on_answer:
-            self._on_answer(answer)
-
-    def _skip(self):
-        if self._answered:
-            return
-        self._answered = True
-        try:
-            self.root.destroy()
-        except Exception:
-            pass
-        if self._on_answer:
-            self._on_answer("")

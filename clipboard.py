@@ -6,10 +6,6 @@ import uuid
 from config import _dbg
 
 
-def _as_str(s: str) -> str:
-    """Escape a string for use inside an AppleScript double-quoted literal."""
-    return s.replace("\\", "\\\\").replace('"', '\\"')
-
 
 def _hid_release_modifiers():
     """Post key-up events for Cmd, Alt, Shift, Ctrl at HID level to clear any held modifiers."""

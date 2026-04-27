@@ -280,19 +280,19 @@ class HotkeyMonitor:
             self._runloop_stop = True  # signal thread to exit
 
     def stop(self):
+        # Signal threads to exit BEFORE nulling the tap reference so the
+        # CGEventTap thread's re-enable check never dereferences a stale tap.
         try:
             self._tap_stop = True
-            self._tap = None
-            self._src = None
         except Exception as e:
             _dbg(f"[hotkey_macos] stop tap error: {e}")
-
         try:
-            # Signal the NSEvent background thread to stop (it removes the monitor itself)
             self._runloop_stop = True
         except Exception as e:
             _dbg(f"[hotkey_macos] stop ns monitor error: {e}")
-
+        # Null refs after signalling — threads will see _tap_stop=True first
+        self._tap = None
+        self._src = None
         _dbg("[hotkey_macos] Monitor stopped.")
 
     @property

@@ -25,6 +25,11 @@ def _ax_trusted() -> bool:
     if SYSTEM != "Darwin":
         return True
     try:
+        from ApplicationServices import AXIsProcessTrustedWithOptions
+        return bool(AXIsProcessTrustedWithOptions({"AXTrustedCheckOptionPrompt": False}))
+    except Exception:
+        pass
+    try:
         import ctypes
         ax = ctypes.cdll.LoadLibrary(
             "/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices"
@@ -32,7 +37,7 @@ def _ax_trusted() -> bool:
         ax.AXIsProcessTrusted.restype = ctypes.c_bool
         return bool(ax.AXIsProcessTrusted())
     except Exception:
-        return True  # can't check — assume OK
+        return False  # unknown → deny flow, prompt user
 
 
 class KPrompter:
@@ -202,7 +207,8 @@ class KPrompter:
                     "Go to: System Settings → Privacy & Security → Accessibility\n"
                     "Enable KPrompter, then try the hotkey again."
                 )
-                self._busy = False
+                with self._busy_lock:
+                    self._busy = False
                 return
 
             # ── Grab text NOW before any sleep (we're on a fresh thread, not tap thread) ──
@@ -225,7 +231,8 @@ class KPrompter:
                     "If this keeps happening, check:\n"
                     "System Settings → Privacy & Security → Accessibility → KPrompter ✓"
                 )
-                self._busy = False
+                with self._busy_lock:
+                    self._busy = False
                 return
 
             # ── Show in Home tab + typing indicator ──────────────────────────
@@ -468,6 +475,10 @@ class KPrompter:
                 on_optimize=self._optimize_for_project,
             )
             self._project_windows.append(pw)
+            pw.win.protocol("WM_DELETE_WINDOW",
+                            lambda w=pw: (self._project_windows.remove(w)
+                                         if w in self._project_windows else None,
+                                         w.win.destroy()))
 
     def _optimize_for_project(self, text: str, project):
         """Run optimization for a project window (uses project's conversation)."""
@@ -496,9 +507,15 @@ class KPrompter:
             project.conversation.append({"role": "assistant", "content": result})
             if len(project.conversation) > 6:
                 project.conversation = project.conversation[-6:]
-            sw = getattr(self, "_settings_win", None)
-            if sw and self._root:
-                self._root.after(0, lambda r=result: sw.append_ai_message(r))
+            # Show result in the project window's input field (replaces input with optimized text)
+            if self._root:
+                def _show_result(r=result, p=project):
+                    try:
+                        p._input.delete("1.0", "end")
+                        p._input.insert("1.0", r)
+                    except Exception:
+                        pass
+                self._root.after(0, _show_result)
         except Exception:
             pass
         finally:
