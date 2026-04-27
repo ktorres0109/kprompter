@@ -1097,15 +1097,12 @@ class SettingsWindow:
         self._home_container = frame
         self._refresh_home_vars()
 
-        # Build Welcome Frame
+        # ── Welcome screen ────────────────────────────────────────────────────
         self._welcome_frame = tk.Frame(frame, bg=BG)
+        tk.Frame(self._welcome_frame, bg=BG).pack(fill="both", expand=True)  # top spacer
 
-        # Top Spacer - pushes content to center
-        tk.Frame(self._welcome_frame, bg=BG).pack(side="top", fill="both", expand=True)
-
-        # Title: K> in icon colors + " Chat?"
         title_frame = tk.Frame(self._welcome_frame, bg=BG)
-        title_frame.pack(side="top", pady=(0, 20))
+        title_frame.pack(pady=(0, 20))
         tk.Label(title_frame, text="K", font=(FONT_MONO[0], 22, "bold"),
                  bg=BG, fg=HEADER_CYN).pack(side="left")
         tk.Label(title_frame, text=">", font=(FONT_MONO[0], 22, "bold"),
@@ -1113,58 +1110,84 @@ class SettingsWindow:
         tk.Label(title_frame, text="  Chat?", bg=BG, fg="#c8fce8",
                  font=(FONT_UI[0], 22)).pack(side="left")
 
-        # Rounded pill text input
         self._w_input = _PillText(self._welcome_frame, bg=BG3, fg=TEXT, font=FONT_MONO_SM, height_lines=2)
-        self._w_input.pack(side="top", fill="x", padx=60, pady=10)
-        self._w_input.bind_text("<Return>",       lambda e: (self._trigger_optimize(self._w_input), "break")[1])
-        self._w_input.bind_text("<Shift-Return>",  lambda e: None)
+        self._w_input.pack(fill="x", padx=60, pady=10)
+        self._w_input.bind_text("<Return>",      lambda e: (self._trigger_optimize(self._w_input), "break")[1])
+        self._w_input.bind_text("<Shift-Return>", lambda e: None)
 
         w_btn_row = tk.Frame(self._welcome_frame, bg=BG)
-        w_btn_row.pack(side="top", fill="x", padx=60, pady=6)
+        w_btn_row.pack(fill="x", padx=60, pady=6)
         _PillBtn(w_btn_row, "Optimize →", command=lambda: self._trigger_optimize(self._w_input),
                  bg=BTN, fg=ACCENT, hover_bg=BTN_H, fnt=(*FONT_UI[:2], "bold"),
                  padx=20, pady=6, parent_bg=BG).pack(side="right")
 
-        # Bottom Spacer
-        tk.Frame(self._welcome_frame, bg=BG).pack(side="top", fill="both", expand=True)
+        tk.Frame(self._welcome_frame, bg=BG).pack(fill="both", expand=True)  # bottom spacer
 
-        # Chat Feed Frame
-        self._chat_frame = tk.Frame(frame, bg=BG, padx=14, pady=10)
-        from tkinter import scrolledtext
-        self._home_chat = scrolledtext.ScrolledText(
-            self._chat_frame, bg=BG, fg=TEXT, font=FONT_MONO_SM,
-            relief="flat", bd=0, wrap="word", padx=10, pady=10,
+        # ── Chat container (canvas feed + input bar) ─────────────────────────
+        self._chat_container = tk.Frame(frame, bg=BG)
+
+        # Scrollable message canvas
+        canvas_frame = tk.Frame(self._chat_container, bg=BG)
+        canvas_frame.pack(fill="both", expand=True)
+
+        self._chat_canvas = tk.Canvas(canvas_frame, bg=BG, highlightthickness=0, bd=0)
+        _chat_sb = ttk.Scrollbar(canvas_frame, orient="vertical",
+                                  command=self._chat_canvas.yview)
+        self._chat_canvas.configure(yscrollcommand=_chat_sb.set)
+        _chat_sb.pack(side="right", fill="y")
+        self._chat_canvas.pack(side="left", fill="both", expand=True)
+
+        self._chat_inner = tk.Frame(self._chat_canvas, bg=BG)
+        self._chat_win_id = self._chat_canvas.create_window(
+            (0, 0), window=self._chat_inner, anchor="nw"
         )
-        self._home_chat.pack(fill="both", expand=True)
-        self._home_chat.configure(state="disabled")
 
-        # Persistent bottom input bar
-        self._input_frame = tk.Frame(frame, bg=BG, padx=20, pady=10)
+        def _on_canvas_resize(e):
+            self._chat_canvas.itemconfig(self._chat_win_id, width=e.width)
+        def _on_inner_resize(e):
+            self._chat_canvas.configure(scrollregion=self._chat_canvas.bbox("all"))
+
+        self._chat_canvas.bind("<Configure>", _on_canvas_resize)
+        self._chat_inner.bind("<Configure>", _on_inner_resize)
+
+        # Bind mousewheel to canvas and all children
+        def _bind_scroll(widget):
+            widget.bind("<MouseWheel>",
+                        lambda e: self._chat_canvas.yview_scroll(
+                            int(-1 * (e.delta / 120)), "units"))
+        _bind_scroll(self._chat_canvas)
+        _bind_scroll(self._chat_inner)
+
+        # ── Input bar ────────────────────────────────────────────────────────
+        _divider(self._chat_container).pack(fill="x")
+        self._input_frame = tk.Frame(self._chat_container, bg=BG, padx=16, pady=12)
+        self._input_frame.pack(side="bottom", fill="x")
 
         self._home_input = _PillText(self._input_frame, bg=BG3, fg=TEXT, font=FONT_MONO_SM, height_lines=2)
-        self._home_input.pack(side="top", fill="x", pady=(0, 8))
+        self._home_input.pack(fill="x", pady=(0, 8))
         self._home_input.bind_text("<Return>",      lambda e: (self._trigger_optimize(self._home_input), "break")[1])
         self._home_input.bind_text("<Shift-Return>", lambda e: None)
 
         btn_row = tk.Frame(self._input_frame, bg=BG)
-        btn_row.pack(side="bottom", fill="x", pady=(6, 0))
+        btn_row.pack(fill="x")
 
-        self._send_btn = _PillBtn(btn_row, "Optimize →", command=lambda: self._trigger_optimize(self._home_input),
-                 bg=BTN, fg=ACCENT, hover_bg=BTN_H, fnt=(*FONT_UI[:2], "bold"),
-                 padx=20, pady=6, parent_bg=BG)
+        self._send_btn = _PillBtn(btn_row, "Optimize →",
+                                   command=lambda: self._trigger_optimize(self._home_input),
+                                   bg=BTN, fg=ACCENT, hover_bg=BTN_H,
+                                   fnt=(*FONT_UI[:2], "bold"),
+                                   padx=20, pady=6, parent_bg=BG)
         self._send_btn.pack(side="right")
 
         def _clear_chat():
             self.render_history([])
             if hasattr(self, '_on_clear_conversation') and self._on_clear_conversation:
                 self._on_clear_conversation()
-        _btn(btn_row, "Clear Chat", _clear_chat, accent=False, small=True).pack(side="left")
+        _btn(btn_row, "Clear", _clear_chat, accent=False, small=True).pack(side="left")
 
-        # Show welcome frame by default
+        # Show welcome by default
         self._welcome_frame.pack(fill="both", expand=True)
 
     def _trigger_optimize(self, text_widget):
-        # Support both plain tk.Text and _PillText
         if isinstance(text_widget, _PillText):
             text = text_widget.get_text().strip()
             if not text:
@@ -1175,19 +1198,16 @@ class SettingsWindow:
             if not text:
                 return
             text_widget.delete("1.0", "end")
-        
-        # We enforce transition to chat mode
+
         self._welcome_frame.pack_forget()
-        self._input_frame.pack(side="bottom", fill="x")
-        self._chat_frame.pack(side="top", fill="both", expand=True)
-        
+        self._chat_container.pack(fill="both", expand=True)
+
         if self._on_optimize:
             self._on_optimize(text)
 
     def render_history(self, conversation):
         if not conversation:
-            self._chat_frame.pack_forget()
-            self._input_frame.pack_forget()
+            self._chat_container.pack_forget()
             self._welcome_frame.pack(fill="both", expand=True)
             try:
                 self._w_input.focus_set()
@@ -1195,18 +1215,17 @@ class SettingsWindow:
                 pass
         else:
             self._welcome_frame.pack_forget()
-            self._input_frame.pack(side="bottom", fill="x")
-            self._chat_frame.pack(side="top", fill="both", expand=True)
-            
-            self._home_chat.configure(state="normal")
-            self._home_chat.delete("1.0", "end")
-            self._home_chat.configure(state="disabled")
+            self._chat_container.pack(fill="both", expand=True)
+            # Clear existing message bubbles
+            for w in self._chat_inner.winfo_children():
+                w.destroy()
             for msg in conversation:
                 if msg["role"] == "user":
                     self.append_user_message(msg["content"], is_history=True)
                 elif msg["role"] == "assistant":
                     self.append_ai_message(msg["content"], is_history=True)
-            self._home_chat.yview_moveto(1)
+            self._chat_canvas.update_idletasks()
+            self._chat_canvas.yview_moveto(1)
             try:
                 self._home_input.focus_set()
             except Exception:
@@ -1220,61 +1239,93 @@ class SettingsWindow:
         except:
             pass
 
+    def _scroll_to_bottom(self):
+        self._chat_canvas.update_idletasks()
+        self._chat_canvas.yview_moveto(1)
+
+    def _bind_scroll_to(self, widget):
+        """Recursively bind mousewheel to widget and all descendants."""
+        widget.bind("<MouseWheel>",
+                    lambda e: self._chat_canvas.yview_scroll(
+                        int(-1 * (e.delta / 120)), "units"))
+        for child in widget.winfo_children():
+            self._bind_scroll_to(child)
+
     def append_user_message(self, text, is_history=False):
         if not is_history:
             self._ensure_chat_mode()
-        self._home_chat.configure(state="normal")
-        self._home_chat.tag_configure("right", justify="right")
-        self._home_chat.tag_configure("bold", font=(*FONT_MONO_SM[:2], "bold"))
-        self._home_chat.tag_configure("user_bg", justify="right", background="#2e4a3e", foreground=ACCENT, spacing1=5, spacing3=5, font=FONT_MONO_SM, lmargin1=40, lmargin2=40)
-        
-        self._home_chat.insert("end", "\n\nYou\n", ("right", "bold"))
-        self._home_chat.insert("end", text, "user_bg")
-        self._home_chat.insert("end", "\n", "right")
 
-        btn_bar = tk.Frame(self._home_chat, bg=BG)
-        _btn(btn_bar, "Copy", lambda t=text: self._copy_text(t), accent=False, small=True).pack(side="right", padx=2)
-        if hasattr(self, '_on_retry') and self._on_retry:
-            _btn(btn_bar, "Retry", lambda t=text: self._on_retry(t), accent=False, small=True).pack(side="right", padx=2)
-        
-        self._home_chat.window_create("end", window=btn_bar, align="baseline")
+        row = tk.Frame(self._chat_inner, bg=BG)
+        row.pack(fill="x", padx=20, pady=(10, 2))
+
+        # Header label right-aligned
+        tk.Label(row, text="You", bg=BG, fg=TEXT_DIM,
+                 font=(FONT_UI[0], 8)).pack(anchor="e")
+
+        # Bubble
+        bubble = tk.Frame(row, bg="#1e3a2e", padx=14, pady=10)
+        bubble.pack(anchor="e")
+        tk.Label(bubble, text=text, bg="#1e3a2e", fg=ACCENT,
+                 font=FONT_MONO_SM, wraplength=380, justify="left",
+                 anchor="w").pack(fill="x")
+
+        # Action row
+        action_row = tk.Frame(row, bg=BG)
+        action_row.pack(anchor="e", pady=(3, 0))
+        _btn(action_row, "Copy", lambda t=text: self._copy_text(t),
+             accent=False, small=True).pack(side="right", padx=1)
+        if hasattr(self, "_on_retry") and self._on_retry:
+            _btn(action_row, "Retry", lambda t=text: self._on_retry(t),
+                 accent=False, small=True).pack(side="right", padx=1)
+
+        self._bind_scroll_to(row)
         if not is_history:
-            self._home_chat.yview_moveto(1)
-            self._home_chat.update_idletasks()
-        self._home_chat.configure(state="disabled")
+            self._scroll_to_bottom()
 
     def append_ai_message(self, text, is_history=False):
-        self._home_chat.configure(state="normal")
-        self._home_chat.tag_configure("left", justify="left")
-        self._home_chat.tag_configure("bold", font=(*FONT_MONO_SM[:2], "bold"))
-        
-        self._home_chat.insert("end", "\n\nAI\n", ("left", "bold"))
-        insert_markdown(self._home_chat, text, align="left", bg_color=BG)
-        self._home_chat.insert("end", "\n", "left")
+        row = tk.Frame(self._chat_inner, bg=BG)
+        row.pack(fill="x", padx=20, pady=(10, 2))
 
-        btn_bar = tk.Frame(self._home_chat, bg=BG)
-        _btn(btn_bar, "Copy Model Answer", lambda t=text: self._copy_text(t), accent=False, small=True).pack(side="left", padx=2)
-        
-        self._home_chat.window_create("end", window=btn_bar, align="baseline")
+        # Header label left-aligned
+        tk.Label(row, text="AI", bg=BG, fg=TEXT_DIM,
+                 font=(FONT_UI[0], 8)).pack(anchor="w")
+
+        # Bubble
+        bubble = tk.Frame(row, bg=BG2, padx=14, pady=10)
+        bubble.pack(anchor="w", fill="x")
+        tk.Label(bubble, text=text, bg=BG2, fg=TEXT,
+                 font=FONT_MONO_SM, wraplength=500, justify="left",
+                 anchor="w").pack(fill="x")
+
+        # Action row
+        action_row = tk.Frame(row, bg=BG)
+        action_row.pack(anchor="w", pady=(3, 0))
+        _btn(action_row, "Copy", lambda t=text: self._copy_text(t),
+             accent=False, small=True).pack(side="left", padx=1)
+
+        self._bind_scroll_to(row)
         if not is_history:
-            self._home_chat.yview_moveto(1)
-            self._home_chat.update_idletasks()
-        self._home_chat.configure(state="disabled")
+            self._scroll_to_bottom()
 
     def show_typing(self):
-        self._home_chat.configure(state="normal")
-        self._home_chat.tag_configure("left", justify="left")
-        self._typing_mark = self._home_chat.index("end-1c")
-        self._home_chat.insert("end", "\n\n[AI is thinking...]", ("left", "italic"))
-        self._home_chat.yview_moveto(1)
-        self._home_chat.update_idletasks()
-        self._home_chat.configure(state="disabled")
-        
+        self._typing_frame = tk.Frame(self._chat_inner, bg=BG)
+        self._typing_frame.pack(fill="x", padx=20, pady=(10, 2))
+        tk.Label(self._typing_frame, text="AI", bg=BG, fg=TEXT_DIM,
+                 font=(FONT_UI[0], 8)).pack(anchor="w")
+        self._typing_lbl = tk.Label(self._typing_frame, text="thinking...",
+                                     bg=BG2, fg=TEXT_DIM,
+                                     font=(FONT_UI[0], 9, "italic"),
+                                     padx=14, pady=8)
+        self._typing_lbl.pack(anchor="w")
+        self._scroll_to_bottom()
+
     def hide_typing(self):
-        if hasattr(self, '_typing_mark'):
-            self._home_chat.configure(state="normal")
-            self._home_chat.delete(self._typing_mark, "end")
-            self._home_chat.configure(state="disabled")
+        if hasattr(self, "_typing_frame") and self._typing_frame:
+            try:
+                self._typing_frame.destroy()
+            except Exception:
+                pass
+            self._typing_frame = None
 
     def _refresh_home_vars(self):
         cfg = load_config()
@@ -1290,16 +1341,11 @@ class SettingsWindow:
             self._switch_tab("General")
 
     def _ensure_chat_mode(self):
-        """Switch from the welcome screen to the chat feed view.
-        Called by the hotkey flow so messages appear in the Home tab
-        even when the user hasn't typed anything in the app yet.
-        """
+        """Switch from the welcome screen to the chat feed view."""
         if hasattr(self, "_welcome_frame"):
             self._welcome_frame.pack_forget()
-        if hasattr(self, "_chat_frame"):
-            self._chat_frame.pack(side="top", fill="both", expand=True)
-        if hasattr(self, "_input_frame"):
-            self._input_frame.pack(side="bottom", fill="x")
+        if hasattr(self, "_chat_container"):
+            self._chat_container.pack(fill="both", expand=True)
         # Bring the Home tab to front if we're on another tab
         if self._show_home and hasattr(self, "_switch_tab"):
             self._switch_tab("Home")
