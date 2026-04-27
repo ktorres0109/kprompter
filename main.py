@@ -11,7 +11,7 @@ import os
 import subprocess
 import webbrowser
 
-from config import load_config, is_first_run, PROVIDERS, get_best_model, _dbg
+from config import load_config, is_first_run, PROVIDERS, get_best_model, _dbg, get_api_key
 from optimizer import optimize
 from clipboard import get_selected_text, paste_text, get_frontmost_app, activate_app, grab_selected_text_now
 from gui import SetupWizard, SettingsWindow, LoadingPopup
@@ -48,6 +48,7 @@ class KPrompter:
         self._hotkey_monitor = None     # HotkeyMonitor (macOS NSEvent)
         self._settings_win = None
         self._accessibility_prompted = False
+        self._input_monitoring_prompted = False
 
     # ── Hotkey listener ───────────────────────────────────────────────────────
 
@@ -555,6 +556,31 @@ class KPrompter:
                 pass
 
 
+    def _check_input_monitoring(self):
+        """Prompt for Input Monitoring permission (macOS 10.15+).
+
+        CGRequestListenEventAccess() triggers the native system dialog
+        "KPrompter would like to monitor input from your keyboard."
+        Required alongside Accessibility for CGEventTap to receive key events.
+        """
+        if SYSTEM != "Darwin" or getattr(self, "_input_monitoring_prompted", False):
+            return
+        self._input_monitoring_prompted = True
+        try:
+            from Quartz import CGPreflightListenEventAccess, CGRequestListenEventAccess
+            if not CGPreflightListenEventAccess():
+                CGRequestListenEventAccess()
+        except Exception:
+            try:
+                subprocess.run(
+                    ["open",
+                     "x-apple.systempreferences:com.apple.preference.security"
+                     "?Privacy_ListenEvent"],
+                    check=False,
+                )
+            except Exception:
+                pass
+
     def run(self):
         # Only generate icon in dev mode — frozen builds have the icon already bundled.
         # Re-generating overwrites it with a runtime-generated file that the OS
@@ -575,7 +601,7 @@ class KPrompter:
             wizard.run()
 
         cfg = load_config()
-        if not cfg.get("api_key") and cfg.get("provider") != "ollama":
+        if not get_api_key(cfg.get("provider", "")) and cfg.get("provider") != "ollama":
             print("[KPrompter] Warning: No API key set. Open Settings to add one.")
 
         # Prompt for Accessibility permission before starting the hotkey listener.
@@ -583,6 +609,7 @@ class KPrompter:
         # computer" dialog so the user knows what to grant and where.
         if SYSTEM == "Darwin":
             self._check_accessibility()
+            self._check_input_monitoring()
 
         self._start_hotkey_listener()
 

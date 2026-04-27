@@ -1,5 +1,5 @@
 import requests
-from config import load_config, get_system_prompt, get_custom_instructions, log_entry, PROVIDERS, fetch_ollama_models
+from config import load_config, get_system_prompt, get_custom_instructions, log_entry, PROVIDERS, fetch_ollama_models, get_api_key
 
 
 def call_openai_compatible(base_url: str, api_key: str, model: str,
@@ -84,7 +84,7 @@ def optimize(raw_text: str, is_first_message: bool = True,
              conversation_history: list = None) -> str:
     cfg = load_config()
     provider = cfg.get("provider", "openrouter")
-    api_key  = cfg.get("api_key", "")
+    api_key  = get_api_key(provider)
     model    = cfg.get("model", "")
     pinfo    = PROVIDERS.get(provider, {})
 

@@ -12,6 +12,39 @@ try:
 except ImportError:
     requests = None
 
+try:
+    import keyring as _keyring
+except ImportError:
+    _keyring = None
+
+KEYCHAIN_SERVICE = "KPrompter"
+
+
+def get_api_key(provider: str) -> str:
+    """Retrieve API key for the given provider from macOS Keychain."""
+    if not _keyring or not provider:
+        return ""
+    try:
+        return _keyring.get_password(KEYCHAIN_SERVICE, provider) or ""
+    except Exception:
+        return ""
+
+
+def save_api_key(provider: str, key: str):
+    """Store API key in macOS Keychain — never written to config.json."""
+    if not _keyring or not provider:
+        return
+    try:
+        if key:
+            _keyring.set_password(KEYCHAIN_SERVICE, provider, key)
+        else:
+            try:
+                _keyring.delete_password(KEYCHAIN_SERVICE, provider)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
 _DEBUG = os.environ.get("KP_DEBUG") == "1"
 
 
@@ -54,7 +87,6 @@ DEFAULT_SYSTEM_PROMPT_PATH = get_bundle_dir() / "prompts" / "default.txt"
 
 DEFAULTS = {
     "provider": "openrouter",
-    "api_key": "",
     "model": "meta-llama/llama-3.3-70b-instruct:free",
     "hotkey": "cmd+option+k" if platform.system() == "Darwin" else "ctrl+alt+k",
     "logging_enabled": True,
@@ -258,6 +290,18 @@ def load_config() -> dict:
         # Auto-fix any stored Option-key characters in the hotkey
         if "hotkey" in cfg:
             cfg["hotkey"] = _normalize_hotkey(cfg["hotkey"])
+        # One-time migration: move legacy plain-text api_key to Keychain
+        if "api_key" in cfg:
+            legacy_key = cfg.pop("api_key")
+            if legacy_key:
+                provider = cfg.get("provider", "openrouter")
+                if not get_api_key(provider):
+                    save_api_key(provider, legacy_key)
+            # Write back without the api_key field
+            try:
+                _atomic_write_json(CONFIG_FILE, {k: v for k, v in cfg.items() if k != "api_key"})
+            except Exception:
+                pass
         return cfg
     except Exception:
         return DEFAULTS.copy()

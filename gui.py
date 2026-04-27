@@ -11,6 +11,7 @@ from config import (
     load_log, clear_log, is_first_run,
     get_custom_instructions, save_custom_instructions,
     PROVIDERS, CONFIG_DIR, get_best_model, get_model_labels,
+    get_api_key, save_api_key,
 )
 
 SYSTEM = platform.system()
@@ -37,6 +38,32 @@ ORANGE    = "#ff9f0a"
 YELLOW    = "#ffd60a"
 HEADER_GRN = "#4af0a0"   # icon green
 HEADER_CYN = "#4af0a0"   # was cyan — now same terminal green
+
+def _ax_trusted() -> bool:
+    """Return True if Accessibility permission granted (macOS only)."""
+    if SYSTEM != "Darwin":
+        return True
+    try:
+        import ctypes
+        ax = ctypes.cdll.LoadLibrary(
+            "/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices"
+        )
+        ax.AXIsProcessTrusted.restype = ctypes.c_bool
+        return bool(ax.AXIsProcessTrusted())
+    except Exception:
+        return True
+
+
+def _im_trusted() -> bool:
+    """Return True if Input Monitoring permission granted (macOS 10.15+)."""
+    if SYSTEM != "Darwin":
+        return True
+    try:
+        from Quartz import CGPreflightListenEventAccess
+        return bool(CGPreflightListenEventAccess())
+    except Exception:
+        return True
+
 
 _is_mac = SYSTEM == "Darwin"
 _is_win = SYSTEM == "Windows"
@@ -290,7 +317,7 @@ class SetupWizard:
                       self._step_apikey, self._step_model,
                       self._step_hotkey, self._step_done]
         self._provider_var = tk.StringVar(value=self.cfg.get("provider", "openrouter"))
-        self._key_var      = tk.StringVar(value=self.cfg.get("api_key", ""))
+        self._key_var      = tk.StringVar(value=get_api_key(self.cfg.get("provider", "openrouter")))
         self._hotkey_var   = tk.StringVar(value=_hotkey_display(self.cfg.get("hotkey", "cmd+option+k" if _is_mac else "ctrl+alt+k")))
         self._model_var    = tk.StringVar(value=self.cfg.get("model", ""))
         self._model_cb     = None
@@ -307,6 +334,7 @@ class SetupWizard:
         p = self._provider_var.get()
         best = get_best_model(p)
         self._model_var.set(best)
+        self._key_var.set(get_api_key(p))
 
     def _clear(self):
         for w in self.container.winfo_children():
@@ -708,10 +736,10 @@ class SetupWizard:
 
         cfg = load_config()
         cfg["provider"] = provider
-        cfg["api_key"]  = self._key_var.get()
         cfg["hotkey"]   = self._hotkey_var.get()
         cfg["model"]    = model_id
         save_config(cfg)
+        save_api_key(provider, self._key_var.get())
         self.cfg = cfg
 
     def run(self):
@@ -942,6 +970,9 @@ class SettingsWindow:
         )
         self._model_lbl.place(relx=0.5, rely=0.5, anchor="center")
 
+        # ── Permission status bar ──────────────────────────────────────────
+        self._build_perm_bar(self._frame)
+
         # ── Tab content frames ────────────────────────────────────────────
         content = tk.Frame(self._frame, bg=BG)
         content.pack(fill="both", expand=True)
@@ -991,6 +1022,72 @@ class SettingsWindow:
         self._nb = None
 
     # ── Home tab ──────────────────────────────────────────────────────────────
+    # ── Permission status bar ─────────────────────────────────────────────────
+
+    def _build_perm_bar(self, parent):
+        """24px strip showing Accessibility + Input Monitoring status."""
+        bar = tk.Frame(parent, bg=BG, height=24)
+        bar.pack(fill="x")
+        bar.pack_propagate(False)
+
+        inner = tk.Frame(bar, bg=BG)
+        inner.place(relx=0.5, rely=0.5, anchor="center")
+
+        self._perm_ax_lbl = tk.Label(inner, bg=BG, font=FONT_UI_SM, cursor="hand2")
+        self._perm_ax_lbl.pack(side="left", padx=(0, 16))
+        self._perm_im_lbl = tk.Label(inner, bg=BG, font=FONT_UI_SM, cursor="hand2")
+        self._perm_im_lbl.pack(side="left")
+
+        self._perm_ax_lbl.bind("<Button-1>", lambda e: self._perm_ax_action())
+        self._perm_im_lbl.bind("<Button-1>", lambda e: self._perm_im_action())
+
+        self._perm_poll()
+
+    def _perm_poll(self):
+        """Refresh permission labels every 2 s."""
+        try:
+            ax_ok = _ax_trusted()
+            im_ok = _im_trusted()
+            if hasattr(self, "_perm_ax_lbl"):
+                self._perm_ax_lbl.configure(
+                    text="Accessibility ✓" if ax_ok else "Accessibility ✗",
+                    fg=GREEN if ax_ok else RED,
+                )
+            if hasattr(self, "_perm_im_lbl"):
+                self._perm_im_lbl.configure(
+                    text="Input Monitoring ✓" if im_ok else "Input Monitoring ✗",
+                    fg=GREEN if im_ok else RED,
+                )
+            self.root.after(2000, self._perm_poll)
+        except Exception:
+            pass
+
+    def _perm_ax_action(self):
+        if _ax_trusted():
+            return
+        try:
+            from ApplicationServices import AXIsProcessTrustedWithOptions
+            AXIsProcessTrustedWithOptions({"AXTrustedCheckOptionPrompt": True})
+        except Exception:
+            subprocess.run(
+                ["open", "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"],
+                check=False,
+            )
+
+    def _perm_im_action(self):
+        if _im_trusted():
+            return
+        try:
+            from Quartz import CGRequestListenEventAccess
+            CGRequestListenEventAccess()
+        except Exception:
+            subprocess.run(
+                ["open", "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent"],
+                check=False,
+            )
+
+    # ── Home tab ──────────────────────────────────────────────────────────────
+
     def _tab_home(self, frame):
         self._home_container = frame
         self._refresh_home_vars()
@@ -1343,7 +1440,7 @@ class SettingsWindow:
 
         prov_var  = tk.StringVar(value=self.cfg.get("provider", "openrouter"))
         model_var = tk.StringVar(value=self.cfg.get("model", ""))
-        key_var   = tk.StringVar(value=self.cfg.get("api_key", ""))
+        key_var   = tk.StringVar(value=get_api_key(self.cfg.get("provider", "openrouter")))
         url_var   = tk.StringVar(value=self.cfg.get("ollama_url", "http://localhost:11434"))
         _model_cb_ref = [None]
 
@@ -1474,6 +1571,7 @@ class SettingsWindow:
             p = prov_var.get()
             if p != "ollama":
                 model_var.set(get_best_model(p))
+            key_var.set(get_api_key(p))
             show_provider(p)
         prov_var.trace_add("write", on_prov_change)
 
@@ -1502,10 +1600,10 @@ class SettingsWindow:
             if cb and hasattr(cb, "_model_map"):
                 model_id = cb._model_map.get(model_var.get(), model_var.get())
             self.cfg["provider"]   = prov_var.get()
-            self.cfg["api_key"]    = key_var.get()
             self.cfg["model"]      = model_id
             self.cfg["ollama_url"] = url_var.get()
             save_config(self.cfg)
+            save_api_key(prov_var.get(), key_var.get())
             self._refresh_home_vars()
             messagebox.showinfo("KPrompter", "Provider settings saved.")
         _btn(pad, "Save Provider", save).pack(anchor="w")
@@ -1711,8 +1809,10 @@ class ProjectWindow:
 class LoadingPopup:
     """Small transparent pill at the top-right of the screen while the AI is working."""
 
-    _BAR_BG  = "#1c1c1e"
-    _W, _H   = 220, 36
+    _BG   = "#1c1c1e"
+    _W, _H = 260, 52
+    _R    = 14  # pill corner radius
+    _DOTS = ["●○○", "○●○", "○○●"]
 
     def __init__(self, parent=None):
         self.root = tk.Toplevel()
@@ -1720,42 +1820,55 @@ class LoadingPopup:
         self.root.overrideredirect(True)
         self.root.attributes("-topmost", True)
         if SYSTEM == "Darwin":
-            self.root.attributes("-alpha", 0.88)
+            self.root.attributes("-alpha", 0.92)
+            try:
+                self.root.attributes("-transparentcolor", "black")
+            except Exception:
+                pass
 
         sw = self.root.winfo_screenwidth()
-        x  = sw - self._W - 20
-        y  = 20
+        x  = sw - self._W - 30
+        y  = 30
         self.root.geometry(f"{self._W}x{self._H}+{x}+{y}")
+        self.root.configure(bg="black")
 
-        outer = tk.Frame(self.root, bg=self._BAR_BG,
-                         highlightthickness=1, highlightbackground=BORDER)
-        outer.pack(fill="both", expand=True)
+        # Canvas for rounded pill border
+        self._cv = tk.Canvas(self.root, width=self._W, height=self._H,
+                             bg="black", highlightthickness=0)
+        self._cv.place(x=0, y=0)
+        r = self._R
+        W, H = self._W, self._H
+        self._cv.create_polygon(
+            r, 0, W - r, 0,
+            W, 0, W, r,
+            W, H - r, W, H,
+            W - r, H, r, H,
+            0, H, 0, H - r,
+            0, r, 0, 0,
+            smooth=True, fill=self._BG, outline=BORDER, width=1,
+        )
 
-        row = tk.Frame(outer, bg=self._BAR_BG)
-        row.pack(fill="x", padx=10, pady=(6, 2))
-        tk.Label(row, text="K>", bg=self._BAR_BG, fg=ACCENT,
-                 font=(FONT_MONO[0], 9, "bold")).pack(side="left")
-        self._lbl = tk.Label(row, text=" optimizing", bg=self._BAR_BG, fg=TEXT_DIM,
-                              font=(FONT_UI[0], 9))
-        self._lbl.pack(side="left")
+        # Inner content row
+        row = tk.Frame(self.root, bg=BG2)
+        row.place(x=r + 4, y=0, width=W - 2 * r - 8, height=H)
 
-        style = ttk.Style()
-        style.configure("KPill.Horizontal.TProgressbar",
-                        troughcolor=BORDER, background=ACCENT, thickness=2)
-        self._pb = ttk.Progressbar(outer, style="KPill.Horizontal.TProgressbar",
-                                    mode="indeterminate")
-        self._pb.pack(fill="x", padx=10, pady=(0, 6))
-        self._pb.start(10)
+        tk.Label(row, text="K>", bg=BG2, fg=ACCENT,
+                 font=(FONT_MONO[0], 11, "bold")).pack(side="left", padx=(4, 0))
+        tk.Label(row, text=" optimizing", bg=BG2, fg=TEXT_DIM,
+                 font=(FONT_UI[0], 10)).pack(side="left")
+        self._dot_lbl = tk.Label(row, text=self._DOTS[0], bg=BG2, fg=TEXT_DIM,
+                                  font=(FONT_UI[0], 10))
+        self._dot_lbl.pack(side="left", padx=(4, 0))
 
-        self._dots = 0
-        self._id   = None
+        self._phase = 0
+        self._id    = None
         self._tick()
         self.root.deiconify()
 
     def _tick(self):
         try:
-            self._lbl.configure(text=" optimizing" + "." * (self._dots % 4))
-            self._dots += 1
+            self._phase = (self._phase + 1) % 3
+            self._dot_lbl.configure(text=self._DOTS[self._phase])
             self._id = self.root.after(400, self._tick)
         except Exception:
             pass
@@ -1764,7 +1877,6 @@ class LoadingPopup:
         try:
             if self._id:
                 self.root.after_cancel(self._id)
-            self._pb.stop()
             self.root.destroy()
         except Exception:
             pass
