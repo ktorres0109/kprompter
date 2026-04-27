@@ -265,15 +265,16 @@ class _PillBtn(tk.Canvas):
 # ── Model Combobox helper ─────────────────────────────────────────────────────
 
 def _model_combobox(parent, provider: str, model_var: tk.StringVar) -> ttk.Combobox:
+    """Editable combobox: dropdown shows known models, user can also type any model ID."""
     models = get_model_labels(provider)
-    labels = []
-    for label, mid, free in models:
-        tag = "  [FREE]" if free else "  [PAID]"
-        labels.append(f"{label}{tag}")
+    # label → model ID mapping; for providers where label ≠ ID
+    model_map = {label: mid for label, mid, _free in models}
+    # Also map ID → ID so a typed ID resolves to itself
+    for _label, mid, _free in models:
+        model_map[mid] = mid
+    labels = [label for label, _mid, _free in models]
 
     style = ttk.Style()
-    # Only switch to "default" theme on non-macOS; on macOS the "aqua" theme
-    # handles native widget rendering and overriding it breaks visuals.
     if not _is_mac:
         style.theme_use("default")
     style.configure("Model.TCombobox",
@@ -282,25 +283,26 @@ def _model_combobox(parent, provider: str, model_var: tk.StringVar) -> ttk.Combo
                     selectforeground="#ffffff", arrowcolor=ACCENT,
                     borderwidth=0, relief="flat")
     style.map("Model.TCombobox",
-              fieldbackground=[("readonly", BG3)],
-              foreground=[("readonly", TEXT)],
+              fieldbackground=[("readonly", BG3), ("!readonly", BG3)],
+              foreground=[("readonly", TEXT), ("!readonly", TEXT)],
               selectbackground=[("readonly", ACCENT)])
 
+    cfg_model = load_config().get("model", "")
+
     cb = ttk.Combobox(parent, textvariable=model_var,
-                      values=labels, state="readonly",
+                      values=labels, state="normal",
                       style="Model.TCombobox", width=42)
 
-    cfg_model = load_config().get("model", "")
-    selected_idx = 0
-    for i, (label, mid, free) in enumerate(models):
-        if mid == cfg_model:
-            selected_idx = i
-            break
-    if labels:
-        cb.current(selected_idx)
+    # Pre-select by model ID — show label if known, else show raw ID
+    matched_label = next((lbl for lbl, mid, _ in models if mid == cfg_model), None)
+    if matched_label:
+        cb.set(matched_label)
+    elif cfg_model:
+        cb.set(cfg_model)
+    elif labels:
+        cb.current(0)
 
-    cb._model_map = {f"{label}{'  [FREE]' if free else '  [PAID]'}": mid
-                     for label, mid, free in models}
+    cb._model_map = model_map
     return cb
 
 

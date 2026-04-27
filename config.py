@@ -104,16 +104,13 @@ PROVIDERS = {
         "base_url": "https://openrouter.ai/api/v1",
         "best_free": "google/gemini-2.5-flash-preview:free",
         "models": [
-            {"label": "Gemini 2.5 Flash Preview (free)", "id": "google/gemini-2.5-flash-preview:free",              "free": True},
-            {"label": "Llama 4 Maverick (free)",       "id": "meta-llama/llama-4-maverick:free",                  "free": True},
-            {"label": "Llama 4 Scout (free)",          "id": "meta-llama/llama-4-scout:free",                     "free": True},
-            {"label": "DeepSeek V3 (free)",            "id": "deepseek/deepseek-chat-v3-0324:free",               "free": True},
-            {"label": "DeepSeek R1 Zero (free)",       "id": "deepseek/deepseek-r1-zero:free",                    "free": True},
-            {"label": "Mistral Small 3.1 24B (free)",  "id": "mistralai/mistral-small-3.1-24b-instruct:free",     "free": True},
-            {"label": "Qwen3 Coder 480B (free)",       "id": "qwen/qwen3-coder:free",                             "free": True},
-            {"label": "GPT-4o Mini",                   "id": "openai/gpt-4o-mini",                                "free": False},
-            {"label": "Claude Haiku 4.5",              "id": "anthropic/claude-haiku-4-5",                        "free": False},
-            {"label": "Claude Sonnet 4.6",             "id": "anthropic/claude-sonnet-4-6",                       "free": False},
+            {"label": "Gemini 2.5 Flash Preview", "id": "google/gemini-2.5-flash-preview:free",           "free": True},
+            {"label": "Llama 4 Maverick",          "id": "meta-llama/llama-4-maverick:free",               "free": True},
+            {"label": "Llama 4 Scout",             "id": "meta-llama/llama-4-scout:free",                  "free": True},
+            {"label": "DeepSeek V3",               "id": "deepseek/deepseek-chat-v3-0324:free",            "free": True},
+            {"label": "DeepSeek R1 Zero",          "id": "deepseek/deepseek-r1-zero:free",                 "free": True},
+            {"label": "Mistral Small 3.1 24B",     "id": "mistralai/mistral-small-3.1-24b-instruct:free", "free": True},
+            {"label": "Qwen3 Coder 480B",          "id": "qwen/qwen3-coder:free",                         "free": True},
         ],
         "key_url": "https://openrouter.ai/keys",
         "setup_tip": "Recommended. Set a $0 credit limit to block paid models entirely.",
@@ -171,8 +168,16 @@ PROVIDERS = {
 _openrouter_fetched = False
 _openrouter_lock = threading.Lock()
 
+# Providers considered quality for live-fetch filtering
+_QUALITY_PROVIDERS = {
+    "google", "meta-llama", "mistralai", "deepseek", "qwen",
+    "microsoft", "nvidia", "nousresearch", "openai", "anthropic",
+    "cohere", "01-ai", "x-ai",
+}
+
+
 def _fetch_openrouter_models_sync():
-    """Fetch live free models from OpenRouter (called from background thread)."""
+    """Fetch live free models from OpenRouter, keeping only quality providers."""
     global _openrouter_fetched
     if not requests or _openrouter_fetched:
         return
@@ -182,17 +187,28 @@ def _fetch_openrouter_models_sync():
         try:
             response = requests.get("https://openrouter.ai/api/v1/models", timeout=5)
             data = response.json().get('data', [])
-            free_models = [m['id'] for m in data if m.get('pricing', {}).get('prompt', "-1") == "0"]
-            if free_models:
-                current_ids = {m["id"] for m in PROVIDERS["openrouter"]["models"]}
-                for mid in reversed(free_models):
-                    if mid not in current_ids:
-                        name_parts = mid.split("/")[-1].replace("-", " ").title()
-                        label = f"{name_parts} (free live)"
-                        PROVIDERS["openrouter"]["models"].insert(0, {"label": label, "id": mid, "free": True})
+            current_ids = {m["id"] for m in PROVIDERS["openrouter"]["models"]}
+            added = 0
+            for m in data:
+                if m.get('pricing', {}).get('prompt', "-1") != "0":
+                    continue  # paid
+                mid = m.get('id', '')
+                if mid in current_ids:
+                    continue  # already in list
+                provider_slug = mid.split("/")[0] if "/" in mid else ""
+                ctx = m.get('context_length', 0) or 0
+                # Only add: known quality provider OR large context (>=64k)
+                if provider_slug not in _QUALITY_PROVIDERS and ctx < 65536:
+                    continue
+                name = m.get('name') or mid.split("/")[-1].replace("-", " ").title()
+                PROVIDERS["openrouter"]["models"].append(
+                    {"label": name, "id": mid, "free": True}
+                )
+                current_ids.add(mid)
+                added += 1
             _openrouter_fetched = True
         except Exception:
-            _openrouter_fetched = True  # Don't retry on failure
+            _openrouter_fetched = True
 
 
 def start_openrouter_fetch():
