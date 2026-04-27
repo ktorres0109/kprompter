@@ -528,13 +528,7 @@ class KPrompter:
             self._settings_win.render_history(getattr(self, "_conversation", []))
 
     def _check_accessibility(self):
-        """Prompt for Accessibility permission using the native macOS dialog.
-
-        AXIsProcessTrustedWithOptions with kAXTrustedCheckOptionPrompt=True
-        triggers the system alert "KPrompter would like to control this computer"
-        and opens System Settings → Accessibility automatically if denied.
-        Called once on startup and again when the CGEventTap fails.
-        """
+        """Prompt for Accessibility permission only if not already granted."""
         if SYSTEM != "Darwin":
             return
         if getattr(self, "_accessibility_prompted", False):
@@ -542,9 +536,10 @@ class KPrompter:
         self._accessibility_prompted = True
         try:
             from ApplicationServices import AXIsProcessTrustedWithOptions
+            if AXIsProcessTrustedWithOptions({"AXTrustedCheckOptionPrompt": False}):
+                return  # Already trusted — don't show dialog
             AXIsProcessTrustedWithOptions({"AXTrustedCheckOptionPrompt": True})
         except Exception:
-            # PyObjC fallback: open Settings directly
             try:
                 subprocess.run(
                     ["open",
@@ -557,19 +552,15 @@ class KPrompter:
 
 
     def _check_input_monitoring(self):
-        """Prompt for Input Monitoring permission (macOS 10.15+).
-
-        CGRequestListenEventAccess() triggers the native system dialog
-        "KPrompter would like to monitor input from your keyboard."
-        Required alongside Accessibility for CGEventTap to receive key events.
-        """
+        """Prompt for Input Monitoring permission only if not already granted."""
         if SYSTEM != "Darwin" or getattr(self, "_input_monitoring_prompted", False):
             return
         self._input_monitoring_prompted = True
         try:
             from Quartz import CGPreflightListenEventAccess, CGRequestListenEventAccess
-            if not CGPreflightListenEventAccess():
-                CGRequestListenEventAccess()
+            if CGPreflightListenEventAccess():
+                return  # Already granted
+            CGRequestListenEventAccess()
         except Exception:
             try:
                 subprocess.run(
@@ -609,7 +600,8 @@ class KPrompter:
         # computer" dialog so the user knows what to grant and where.
         if SYSTEM == "Darwin":
             self._check_accessibility()
-            self._check_input_monitoring()
+            # Delay IM prompt 1.5 s so the AX dialog can appear and be dismissed first
+            self._root.after(1500, self._check_input_monitoring)
 
         self._start_hotkey_listener()
 

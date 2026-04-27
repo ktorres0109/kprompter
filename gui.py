@@ -44,6 +44,11 @@ def _ax_trusted() -> bool:
     if SYSTEM != "Darwin":
         return True
     try:
+        from ApplicationServices import AXIsProcessTrustedWithOptions
+        return bool(AXIsProcessTrustedWithOptions({"AXTrustedCheckOptionPrompt": False}))
+    except Exception:
+        pass
+    try:
         import ctypes
         ax = ctypes.cdll.LoadLibrary(
             "/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices"
@@ -51,7 +56,7 @@ def _ax_trusted() -> bool:
         ax.AXIsProcessTrusted.restype = ctypes.c_bool
         return bool(ax.AXIsProcessTrusted())
     except Exception:
-        return True
+        return False  # unknown → show red so user knows to check
 
 
 def _im_trusted() -> bool:
@@ -62,7 +67,7 @@ def _im_trusted() -> bool:
         from Quartz import CGPreflightListenEventAccess
         return bool(CGPreflightListenEventAccess())
     except Exception:
-        return True
+        return False  # unknown → show red so user knows to check
 
 
 _is_mac = SYSTEM == "Darwin"
@@ -1063,27 +1068,25 @@ class SettingsWindow:
             pass
 
     def _perm_ax_action(self):
-        if _ax_trusted():
-            return
         try:
             from ApplicationServices import AXIsProcessTrustedWithOptions
             AXIsProcessTrustedWithOptions({"AXTrustedCheckOptionPrompt": True})
         except Exception:
-            subprocess.run(
-                ["open", "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"],
-                check=False,
-            )
+            pass
+        subprocess.run(
+            ["open", "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"],
+            check=False,
+        )
 
     def _perm_im_action(self):
-        if _im_trusted():
-            return
         try:
             from Quartz import CGRequestListenEventAccess
             CGRequestListenEventAccess()
         except Exception:
-            subprocess.run(
-                ["open", "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent"],
-                check=False,
+            pass
+        subprocess.run(
+            ["open", "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent"],
+            check=False,
             )
 
     # ── Home tab ──────────────────────────────────────────────────────────────
